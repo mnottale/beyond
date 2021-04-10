@@ -1,0 +1,81 @@
+syntax = "proto3";
+
+service BeyondService {
+   rpc Describe(Void) returns (Peer) {}
+   rpc Announce(Peer) returns (Void) {}
+   rpc GetPeers(Void) returns (Peers) {}
+   rpc Get(Key) returns (Blob) {}
+   rpc Put(PutArgs) returns(Void) {}
+   rpc AcquireLock(KeyAndVersion) returns (Error) {}
+   rpc ForceAcquireLock(KeyAndVersion) returns (Error) {}
+   rpc WriteAndRelease(BlockAndKey) returns (Error) {}
+}
+
+message Error {
+  enum ErrorCode {
+    OK = 0;
+    ALREADY_LOCKED = 1;
+    OUTDATED = 2;
+  }
+  ErrorCode code = 1;
+}
+message BlockAndKey {
+  Key key = 1;
+  Block block = 2;
+}
+
+message KeyAndVersion {
+  Key key = 1;
+  int64 version = 2;
+}
+
+message PutArgs {
+  Key key = 1;
+  Blob blob = 2;
+}
+message Void {
+  int32 whatever = 1;
+}
+message Peer {
+   Key id = 1;
+   repeated string addresses = 2;
+   int32 port = 3;
+}
+
+message Peers {
+  repeated Peer peers = 1;
+}
+
+message Key {
+  bytes key = 1;
+}
+message Blob {
+  bytes blob = 1;
+}
+
+message Block {
+  int64 version = 1;
+  bytes raw = 2;
+  FileIndex file = 3;
+  DirectoryIndex directory = 4;
+}
+
+message FileIndex {
+  repeated FileBlock blocks = 1;
+}
+
+message FileBlock {
+  Key address = 1;
+}
+message DirectoryIndex {
+  repeated DirectoryEntry entries = 1;
+}
+message DirectoryEntry {
+  enum EntryType {
+    FILE = 0;
+    DIRECTORY = 1;
+  }
+  EntryType entryType = 1;
+  string name = 2;
+  Key address = 3;
+}
