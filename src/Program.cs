@@ -11,10 +11,10 @@ namespace Beyond
     {
         static void Main(string[] args)
         {
-            int Port = Int32.Parse(args[0]);
+            string path = args[0];
+            int Port = Int32.Parse(args[1]);
 
-            Storage storage = new Storage("/tmp/beyond-store");
-            var service = new BeyondServiceImpl(storage, new List<string>{"localhost"}, Port, 3);
+            var service = new BeyondServiceImpl(path, new List<string>{"localhost"}, Port, 3);
             Server server = new Server
             {
                 Services = { BeyondService.BindService(service) },
@@ -22,9 +22,9 @@ namespace Beyond
             };
             server.Start();
 
-            if (args.Length > 1)
+            if (args.Length > 2)
             {
-                _ = service.Connect(args[1]);
+                _ = service.Connect(args[2]);
             }
             Console.WriteLine("RouteGuide server listening on port " + Port);
             Console.WriteLine("Press any key to stop the server...");

@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Text;
+using System.IO;
 using System.Threading.Tasks;
 
 using Microsoft.Extensions.Logging;
@@ -28,20 +29,86 @@ namespace Beyond
         private ILogger logger;
         private HashSet<byte[]> locks = new HashSet<byte[]>();
 
-        public BeyondServiceImpl(Storage storage, List<string> hosts, int port, int replicationFactor)
+        public BeyondServiceImpl(string rootPath, List<string> hosts, int port, int replicationFactor)
         {
+            logger = Logger.loggerFactory.CreateLogger<BeyondServiceImpl>();
+            storage = new Storage(rootPath + "/data");
+            try
+            {
+                var idBuf = File.ReadAllBytes(rootPath + "/identity");
+                using (var ms = new MemoryStream(idBuf))
+                {
+                    var key = Key.Parser.ParseFrom(idBuf);
+                    self.Id = key;
+                }
+            }
+            catch (Exception)
+            {
+                logger.LogInformation("Generating key");
+                self.Id = Utils.RandomKey();
+            }
             self = new Peer();
             self.Addresses.Add(hosts);
             self.Port = port;
-            this.storage = storage;
             this.replicationFactor = replicationFactor;
-            logger = Logger.loggerFactory.CreateLogger<BeyondServiceImpl>();
         }
         private async Task<List<BPeer>> LocatePeers(Key key)
         {
-            return new List<BPeer>();
+            var tasks = new List<AsyncUnaryCall<Error>>();
+            foreach (var p in peers)
+            {
+                tasks.Add(p.client.HasBlockAsync(key));
+            }
+            await Task.WhenAll(tasks.Select(x=>x.ResponseAsync));
+            var res = new List<BPeer>();
+            for (var i=0; i< tasks.Count; ++i)
+            {
+                if ((await tasks[i]).Code == Error.Types.ErrorCode.Ok)
+                    res.Add(peers[i]);
+            }
+            if (storage.Has(key))
+                res.Add(null);
+            return res;
         }
-        public async Task<Error> AcquireLock(KeyAndVersion kav)
+        public override async Task<Error> Delete(Key k, ServerCallContext ctx)
+        {
+            var peers = await LocatePeers(k);
+            var tasks = new List<Task<Error>>();
+            foreach (var p in peers)
+            {
+                if (p == null)
+                    tasks.Add(DeleteBlock(k, ctx));
+                else
+                    tasks.Add(p.client.DeleteBlockAsync(k).ResponseAsync);
+            }
+            await Task.WhenAll(tasks);
+            return Utils.ErrorFromCode(Error.Types.ErrorCode.Ok);
+        }
+        public override async Task<Error> DeleteBlock(Key k, ServerCallContext ctx)
+        {
+            storage.Delete(k);
+            return Utils.ErrorFromCode(Error.Types.ErrorCode.Ok);
+        }
+        public override async Task<Error> Insert(BlockAndKey bak, ServerCallContext ctx)
+        {
+            List<BPeer> candidates = new List<BPeer>(peers);
+            candidates.Add(null); // me
+            var targets = Utils.PickN(candidates, replicationFactor);
+            if (targets.Count < replicationFactor/2 + 1)
+                return Utils.ErrorFromCode(Error.Types.ErrorCode.NotEnoughPeers);
+            var tasks = new List<Task<Error>>();
+            foreach (var c in targets)
+            {
+                if (c == null)
+                    tasks.Add(WriteAndRelease(bak, ctx));
+                else
+                    tasks.Add(c.client.WriteAndReleaseAsync(bak).ResponseAsync);
+            }
+            await Task.WhenAll(tasks);
+            // FIXME: handle errors
+            return Utils.ErrorFromCode(Error.Types.ErrorCode.Ok);
+        }
+        public override async Task<Error> AcquireLock(KeyAndVersion kav, ServerCallContext ctx)
         {
             var current = storage.VersionOf(kav.Key);
             if (current != kav.Version -1)
@@ -54,34 +121,37 @@ namespace Beyond
             locks.Add(kav.Key.Key_.ToByteArray());
             return Utils.ErrorFromCode(Error.Types.ErrorCode.Ok);
         }
-        public async Task<Error> ForceAcquireLock(KeyAndVersion kav)
+        public override async Task<Error> ForceAcquireLock(KeyAndVersion kav, ServerCallContext ctx)
         {
             locks.Add(kav.Key.Key_.ToByteArray());
             return Utils.ErrorFromCode(Error.Types.ErrorCode.Ok);
         }
-        public async Task<Error> WriteAndRelease(BlockAndKey bak)
+        public override async Task<Error> WriteAndRelease(BlockAndKey bak, ServerCallContext ctx)
         {
             var serialized = bak.Block.ToByteArray();
             storage.Put(bak.Key, serialized);
             locks.Remove(bak.Key.Key_.ToByteArray());
             return Utils.ErrorFromCode(Error.Types.ErrorCode.Ok);
         }
-        public async Task TransactionalUpdate(Key key, Block block)
+        public override async Task<Error> TransactionalUpdate(BlockAndKey bak, ServerCallContext ctx)
         {
             var bv = new KeyAndVersion();
-            bv.Key = key;
-            bv.Version = block.Version;
-            var peers = await LocatePeers(key);
+            bv.Key = bak.Key;
+            bv.Version = bak.Block.Version;
+            var peers = await LocatePeers(bak.Key);
             if (peers.Count < replicationFactor / 2 + 1)
-                throw new Exception($"Cannot write, only {peers.Count} located");
+                return Utils.ErrorFromCode(Error.Types.ErrorCode.NotEnoughPeers);
             var acquired = new List<BPeer>();
             var failed = new List<BPeer>();
-            var tasks = new List<AsyncUnaryCall<Error>>();
+            var tasks = new List<Task<Error>>();
             foreach (var p in peers)
             {
-                tasks.Add(p.client.AcquireLockAsync(bv));
+                if (p == null)
+                    tasks.Add(AcquireLock(bv, ctx));
+                else
+                    tasks.Add(p.client.AcquireLockAsync(bv).ResponseAsync);
             }
-            await Task.WhenAll(tasks.Select(x=>x.ResponseAsync));
+            await Task.WhenAll(tasks);
             for (var i=0; i<tasks.Count; i++)
             {
                 var res = await tasks[i];
@@ -90,25 +160,29 @@ namespace Beyond
                 else if (res.Code == Error.Types.ErrorCode.AlreadyLocked)
                     failed.Add(peers[i]);
                 else
-                    throw new Exception("Failed to acquire!");
+                    return Utils.ErrorFromCode(res.Code);
             }
             if (acquired.Count < replicationFactor / 2 + 1)
-                throw new Exception("Failed to acquire lock, retry...");
+               return Utils.ErrorFromCode(Error.Types.ErrorCode.Conflict);
             tasks.Clear();
             foreach (var p in failed)
             {
-                tasks.Add(p.client.ForceAcquireLockAsync(bv));
+                if (p == null)
+                    tasks.Add(ForceAcquireLock(bv, ctx));
+                else
+                    tasks.Add(p.client.ForceAcquireLockAsync(bv).ResponseAsync);
             }
-            await Task.WhenAll(tasks.Select(x=>x.ResponseAsync));
+            await Task.WhenAll(tasks);
             tasks.Clear();
-            var bak = new BlockAndKey();
-            bak.Block = block;
-            bak.Key = key;
             foreach (var p in peers)
             {
-                tasks.Add(p.client.WriteAndReleaseAsync(bak));
+                if (p == null)
+                    tasks.Add(WriteAndRelease(bak, ctx));
+                else
+                    tasks.Add(p.client.WriteAndReleaseAsync(bak).ResponseAsync);
             }
-            await Task.WhenAll(tasks.Select(x=>x.ResponseAsync));
+            await Task.WhenAll(tasks);
+            return Utils.ErrorFromCode(Error.Types.ErrorCode.Ok);
         }
         public Task Connect(string host, int port)
         {
@@ -119,7 +193,18 @@ namespace Beyond
             var channel = new Channel(hostport, ChannelCredentials.Insecure);
             var client = new BeyondService.BeyondServiceClient(channel);
             var desc = await client.DescribeAsync(new Void());
-            peers.Add(new BPeer { info = desc, client = client});
+            var hit = false;
+            foreach (var p in peers)
+            {
+                if (p.info.Id == desc.Id)
+                {
+                    p.info = desc;
+                    hit = true;
+                    break;
+                }
+            }
+            if (!hit)
+                peers.Add(new BPeer { info = desc, client = client});
             await client.AnnounceAsync(self);
             logger.LogInformation("Connected to peer at {host} {port}", desc.Addresses[0], desc.Port);
         }
@@ -152,6 +237,13 @@ namespace Beyond
         {
             storage.Put(pa.Key, pa.Blob.Blob_.ToByteArray());
             return Task.FromResult(new Void());
+        }
+        public override Task<Error> HasBlock(Key key, ServerCallContext ctx)
+        {
+            if (storage.Has(key))
+                return Task.FromResult(Utils.ErrorFromCode(Error.Types.ErrorCode.Ok));
+            else
+                return Task.FromResult(Utils.ErrorFromCode(Error.Types.ErrorCode.KeyNotFound));
         }
     }
 }

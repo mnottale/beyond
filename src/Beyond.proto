@@ -1,14 +1,26 @@
 syntax = "proto3";
 
 service BeyondService {
+   // overlay
    rpc Describe(Void) returns (Peer) {}
    rpc Announce(Peer) returns (Void) {}
    rpc GetPeers(Void) returns (Peers) {}
+
+   // delete this
    rpc Get(Key) returns (Blob) {}
    rpc Put(PutArgs) returns(Void) {}
+
+   // local queries
    rpc AcquireLock(KeyAndVersion) returns (Error) {}
    rpc ForceAcquireLock(KeyAndVersion) returns (Error) {}
    rpc WriteAndRelease(BlockAndKey) returns (Error) {}
+   rpc HasBlock(Key) returns (Error) {}
+   rpc DeleteBlock(Key) returns (Error) {}
+
+   // swarm queries
+   rpc TransactionalUpdate(BlockAndKey) returns (Error) {}
+   rpc Insert(BlockAndKey) returns(Error) {}
+   rpc Delete(Key) returns(Error) {}
 }
 
 message Error {
@@ -16,6 +28,9 @@ message Error {
     OK = 0;
     ALREADY_LOCKED = 1;
     OUTDATED = 2;
+    KEY_NOT_FOUND = 3;
+    NOT_ENOUGH_PEERS = 4;
+    CONFLICT = 5;
   }
   ErrorCode code = 1;
 }
