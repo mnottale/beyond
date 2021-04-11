@@ -33,6 +33,7 @@ namespace Beyond
         {
             logger = Logger.loggerFactory.CreateLogger<BeyondServiceImpl>();
             storage = new Storage(rootPath + "/data");
+            self = new Peer();
             try
             {
                 var idBuf = File.ReadAllBytes(rootPath + "/identity");
@@ -47,7 +48,6 @@ namespace Beyond
                 logger.LogInformation("Generating key");
                 self.Id = Utils.RandomKey();
             }
-            self = new Peer();
             self.Addresses.Add(hosts);
             self.Port = port;
             this.replicationFactor = replicationFactor;
@@ -132,6 +132,25 @@ namespace Beyond
             storage.Put(bak.Key, serialized);
             locks.Remove(bak.Key.Key_.ToByteArray());
             return Utils.ErrorFromCode(Error.Types.ErrorCode.Ok);
+        }
+        public override async Task<Block> GetBlock(Key k, ServerCallContext ctx)
+        {
+            var raw = storage.Get(k);
+            using var ms = new MemoryStream(raw);
+            return Block.Parser.ParseFrom(ms);
+        }
+        public override async Task<Block> Query(Key k, ServerCallContext ctx)
+        {
+            var peers = await LocatePeers(k);
+            if (peers.Contains(null))
+                return await GetBlock(k, ctx);
+            foreach (var p in peers)
+            {
+                var b = await p.client.GetBlockAsync(k);
+                if (b.Version > 0)
+                    return b;
+            }
+            return new Block();
         }
         public override async Task<Error> TransactionalUpdate(BlockAndKey bak, ServerCallContext ctx)
         {

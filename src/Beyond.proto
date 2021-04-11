@@ -16,11 +16,13 @@ service BeyondService {
    rpc WriteAndRelease(BlockAndKey) returns (Error) {}
    rpc HasBlock(Key) returns (Error) {}
    rpc DeleteBlock(Key) returns (Error) {}
+   rpc GetBlock(Key) returns (Block) {}
 
    // swarm queries
    rpc TransactionalUpdate(BlockAndKey) returns (Error) {}
    rpc Insert(BlockAndKey) returns(Error) {}
    rpc Delete(Key) returns(Error) {}
+   rpc Query(Key) returns(Block) {}
 }
 
 message Error {

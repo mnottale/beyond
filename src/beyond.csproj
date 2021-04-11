@@ -14,7 +14,10 @@
     <PackageReference Include="Newtonsoft.Json" Version="9.0.1" />
   </ItemGroup>
   <ItemGroup>
-    <Protobuf Include="src/Beyond.proto" Link="src/Beyond.proto" />
+    <ProjectReference Include="../Mono.Fuse.NETStandard/Mono.Fuse.NETStandard/Mono.Fuse.NETStandard.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Protobuf Include="Beyond.proto" Link="Beyond.proto" />
   </ItemGroup>
 
 </Project>

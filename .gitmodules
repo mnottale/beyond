@@ -1,0 +1,3 @@
+[submodule "Mono.Fuse.NETStandard"]
+	path = Mono.Fuse.NETStandard
+	url = https://github.com/alhimik45/Mono.Fuse.NETStandard.git
