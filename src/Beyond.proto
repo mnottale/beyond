@@ -79,6 +79,7 @@ message Block {
 
 message FileIndex {
   repeated FileBlock blocks = 1;
+  uint64 size = 2;
 }
 
 message FileBlock {

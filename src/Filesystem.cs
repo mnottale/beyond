@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 
 using Mono.Fuse.NETStandard;
@@ -26,9 +26,9 @@ namespace Beyond
             public bool dirty;
             public ulong openCount;
             public BlockAndKey fileBlock;
-            public Dictionary<ulong, FileChunk> chunks = new Dictionary<ulong, FileChunk>();
+            public ConcurrentDictionary<ulong, FileChunk> chunks = new ConcurrentDictionary<ulong, FileChunk>();
         };
-        Dictionary<string, OpenedHandle> openedFiles = new Dictionary<string, OpenedHandle>();
+        ConcurrentDictionary<string, OpenedHandle> openedFiles = new ConcurrentDictionary<string, OpenedHandle>();
         public FileSystem(BeyondService.BeyondServiceClient client)
         {
             logger = Logger.loggerFactory.CreateLogger<BeyondServiceImpl>();
@@ -109,7 +109,7 @@ namespace Beyond
 		        }
 		        buf.st_mode = ((block.Block.Directory != null) ? FilePermissions.S_IFDIR : FilePermissions.S_IFREG) | NativeConvert.FromOctalPermissionString("0777");
 		        buf.st_nlink = 1;
-		        buf.st_size = 1000;
+		        buf.st_size = (block.Block.File != null) ? (long)block.Block.File.Size : 1024;
 		        buf.st_blksize = 65536;
 		        buf.st_blocks = buf.st_size / 512;
 		        logger.LogInformation("STAT {path} OK", path);
@@ -355,7 +355,7 @@ namespace Beyond
 		        }
 		        if (file.Block.File == null)
 		            file.Block.File = new FileIndex();
-		        openedFiles.Add(path, new OpenedHandle
+		        openedFiles.TryAdd(path, new OpenedHandle
 		            {
 		                openCount = 1,
 		                fileBlock = file,
@@ -384,8 +384,9 @@ namespace Beyond
 		            data = block.Raw.ToByteArray(),
 		            version = (ulong)block.Version,
 		        };
-		        oh.chunks.Add(chunkIndex, chunk);
+		        oh.chunks.TryAdd(chunkIndex, chunk);
 		    }
+		    logger.LogInformation("ReadFromChunk idx {index} off {offset} clen {chunkLenght} blen {bufLength} boff {bufOffset}", chunkIndex, offset, chunk.data.Length, buf.Length, bufOffset);
 		    var len = Math.Min(chunk.data.Length - offset, buf.Length - bufOffset);
 		    Array.Copy(chunk.data, offset, buf, bufOffset, len);
 		    nRead = (int)len;
@@ -402,10 +403,11 @@ namespace Beyond
 		            return Errno.EBADF;
 		        ulong start_chunk = (ulong)((ulong)offset / CHUNK_SIZE);
 		        ulong end_chunk = (ulong)((ulong)(offset + buf.Length-1) / CHUNK_SIZE);
+		        logger.LogInformation("CHUNKS {startChunk} {endChunk}", start_chunk, end_chunk);
 		        for (var c = start_chunk; c <= end_chunk; ++c)
 		        {
 		            int read = 0;
-		            var err = ReadFromChunk(oh, c, offset - (long)c * (long)CHUNK_SIZE, buf, bytesRead, out read);
+		            var err = ReadFromChunk(oh, c, offset + bytesRead - (long)c * (long)CHUNK_SIZE, buf, bytesRead, out read);
 		            if (err != 0)
 		                return err;
 		            bytesRead += read;
@@ -459,15 +461,15 @@ namespace Beyond
 		            };
 		        }
 		        
-		        oh.chunks.Add(chunkIndex, chunk);
+		        oh.chunks.TryAdd(chunkIndex, chunk);
 		    }
-		    if (chunk.data.Length < buf.Length - bufOffset)
+		    nWrite = (int)Math.Min(buf.Length - bufOffset, (long)CHUNK_SIZE - offset);
+		    if (chunk.data.Length < nWrite + offset)
 		    {
-		        var nd = new byte[buf.Length-bufOffset];
+		        var nd = new byte[nWrite + offset];
 		        Array.Copy(chunk.data, 0, nd, 0, chunk.data.Length);
 		        chunk.data = nd;
 		    }
-		    nWrite = (int)Math.Min((ulong)buf.Length - (ulong)bufOffset, (ulong)CHUNK_SIZE - (ulong)offset);
 		    Array.Copy(buf, bufOffset, chunk.data, offset, nWrite);
 		    chunk.dirty = true;
 		    if (nWrite + offset == (long)CHUNK_SIZE)
@@ -492,6 +494,12 @@ namespace Beyond
 		            if (err != 0)
 		                return err;
 		            bytesWritten += wr;
+		        }
+		        ulong newSz = (ulong)offset + (ulong)buf.Length;
+		        if (oh.fileBlock.Block.File.Size < newSz)
+		        {
+		            oh.fileBlock.Block.File.Size = newSz;
+		            oh.dirty = true;
 		        }
 		    }
 		    catch (Exception e)
@@ -569,7 +577,7 @@ namespace Beyond
 		                {
 		                    FlushFile(oh);
 		                }
-		                openedFiles.Remove(path);
+		                openedFiles.TryRemove(path, out _);
 		            }
 		            catch (Exception e)
 		            {
