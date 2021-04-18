@@ -11,9 +11,10 @@ service BeyondService {
    rpc Put(PutArgs) returns(Void) {}
 
    // local queries
-   rpc AcquireLock(KeyAndVersion) returns (Error) {}
-   rpc ForceAcquireLock(KeyAndVersion) returns (Error) {}
-   rpc WriteAndRelease(BlockAndKey) returns (Error) {}
+   rpc AcquireLock(Lock) returns (Error) {}
+   rpc ForceAcquireLock(Lock) returns (Error) {}
+   rpc Write(BlockAndKey) returns (Error) {}
+   rpc WriteAndRelease(BlockAndLock) returns (Error) {}
    rpc HasBlock(Key) returns (Error) {}
    rpc DeleteBlock(Key) returns (Error) {}
    rpc GetBlock(Key) returns (Block) {}
@@ -23,6 +24,17 @@ service BeyondService {
    rpc Insert(BlockAndKey) returns(Error) {}
    rpc Delete(Key) returns(Error) {}
    rpc Query(Key) returns(Block) {}
+}
+
+message Lock {
+  Key target = 1;
+  int64 version = 2;
+  Key lockUid = 3;
+}
+
+message BlockAndLock {
+  BlockAndKey blockAndKey = 1;
+  Lock lock = 2;
 }
 
 message Error {
