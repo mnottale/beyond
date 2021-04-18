@@ -15,12 +15,36 @@ using Google.Protobuf;
 
 namespace Beyond
 {
-    public class BeyondServiceImpl : BeyondService.BeyondServiceBase
+    public class BeyondClientImpl: BeyondClient.BeyondClientBase
+    {
+        private BeyondServiceImpl backend;
+        public BeyondClientImpl(BeyondServiceImpl backend)
+        {
+            this.backend = backend;
+        }
+        public override Task<Error> TransactionalUpdate(BlockAndKey bak, ServerCallContext ctx)
+        {
+            return backend.TransactionalUpdate(bak, ctx);
+        }
+        public override Task<Error> Insert(BlockAndKey bak, ServerCallContext ctx)
+        {
+            return backend.Insert(bak, ctx);
+        }
+        public override Task<Error> Delete(Key k, ServerCallContext ctx)
+        {
+            return backend.Delete(k, ctx);
+        }
+        public override Task<Block> Query(Key k, ServerCallContext ctx)
+        {
+            return backend.Query(k, ctx);
+        }
+    }
+    public class BeyondServiceImpl : BeyondNode.BeyondNodeBase
     {
         private class BPeer
         {
             public Peer info;
-            public BeyondService.BeyondServiceClient client;
+            public BeyondNode.BeyondNodeClient client;
         }
         private int replicationFactor;
         private Storage storage;
@@ -70,7 +94,7 @@ namespace Beyond
                 res.Add(null);
             return res;
         }
-        public override async Task<Error> Delete(Key k, ServerCallContext ctx)
+        public async Task<Error> Delete(Key k, ServerCallContext ctx)
         {
             var peers = await LocatePeers(k);
             var tasks = new List<Task<Error>>();
@@ -89,7 +113,7 @@ namespace Beyond
             storage.Delete(k);
             return Utils.ErrorFromCode(Error.Types.ErrorCode.Ok);
         }
-        public override async Task<Error> Insert(BlockAndKey bak, ServerCallContext ctx)
+        public async Task<Error> Insert(BlockAndKey bak, ServerCallContext ctx)
         {
             List<BPeer> candidates = new List<BPeer>(peers);
             candidates.Add(null); // me
@@ -151,7 +175,7 @@ namespace Beyond
             using var ms = new MemoryStream(raw);
             return Block.Parser.ParseFrom(ms);
         }
-        public override async Task<Block> Query(Key k, ServerCallContext ctx)
+        public async Task<Block> Query(Key k, ServerCallContext ctx)
         {
             var peers = await LocatePeers(k);
             if (peers.Contains(null))
@@ -164,7 +188,7 @@ namespace Beyond
             }
             return new Block();
         }
-        public override async Task<Error> TransactionalUpdate(BlockAndKey bak, ServerCallContext ctx)
+        public async Task<Error> TransactionalUpdate(BlockAndKey bak, ServerCallContext ctx)
         {
             var lk = new Lock();
             lk.Target = bak.Key;
@@ -226,7 +250,7 @@ namespace Beyond
         public async Task Connect(string hostport)
         {
             var channel = new Channel(hostport, ChannelCredentials.Insecure);
-            var client = new BeyondService.BeyondServiceClient(channel);
+            var client = new BeyondNode.BeyondNodeClient(channel);
             var desc = await client.DescribeAsync(new Void());
             var hit = false;
             foreach (var p in peers)

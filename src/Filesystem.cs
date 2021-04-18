@@ -10,7 +10,7 @@ namespace Beyond
 {
     class FileSystem: Mono.Fuse.NETStandard.FileSystem
     {
-        private BeyondService.BeyondServiceClient client;
+        private BeyondClient.BeyondClientClient client;
         private ILogger logger;
         const ulong CHUNK_SIZE = 65536;
 
@@ -29,7 +29,7 @@ namespace Beyond
             public ConcurrentDictionary<ulong, FileChunk> chunks = new ConcurrentDictionary<ulong, FileChunk>();
         };
         ConcurrentDictionary<string, OpenedHandle> openedFiles = new ConcurrentDictionary<string, OpenedHandle>();
-        public FileSystem(BeyondService.BeyondServiceClient client)
+        public FileSystem(BeyondClient.BeyondClientClient client)
         {
             logger = Logger.loggerFactory.CreateLogger<BeyondServiceImpl>();
             this.client = client;

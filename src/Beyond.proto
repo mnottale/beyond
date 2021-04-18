@@ -1,6 +1,13 @@
 syntax = "proto3";
 
-service BeyondService {
+service BeyondClient {
+   rpc TransactionalUpdate(BlockAndKey) returns (Error) {}
+   rpc Insert(BlockAndKey) returns(Error) {}
+   rpc Delete(Key) returns(Error) {}
+   rpc Query(Key) returns(Block) {}
+}
+
+service BeyondNode {
    // overlay
    rpc Describe(Void) returns (Peer) {}
    rpc Announce(Peer) returns (Void) {}
@@ -18,12 +25,6 @@ service BeyondService {
    rpc HasBlock(Key) returns (Error) {}
    rpc DeleteBlock(Key) returns (Error) {}
    rpc GetBlock(Key) returns (Block) {}
-
-   // swarm queries
-   rpc TransactionalUpdate(BlockAndKey) returns (Error) {}
-   rpc Insert(BlockAndKey) returns(Error) {}
-   rpc Delete(Key) returns(Error) {}
-   rpc Query(Key) returns(Block) {}
 }
 
 message Lock {
