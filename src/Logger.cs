@@ -8,8 +8,9 @@ namespace Beyond
             {
                 builder
                     //.AddConfiguration(loggingConfiguration.GetSection("Logging"))
-                    .AddFilter("Microsoft", LogLevel.Warning)
-                    .AddFilter("System", LogLevel.Warning)
+                    .AddFilter("Microsoft", LogLevel.Information)
+                    .AddFilter("System", LogLevel.Information)
+                    .AddFilter("Grpc", LogLevel.Debug)
                     //.AddFilter("SampleApp.Program", LogLevel.Debug)
                     .AddConsole();
                     //.AddEventLog();

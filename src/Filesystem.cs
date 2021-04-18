@@ -33,6 +33,7 @@ namespace Beyond
         {
             logger = Logger.loggerFactory.CreateLogger<BeyondServiceImpl>();
             this.client = client;
+            GetRoot(); // ping
         }
         public void MkFS()
         {
