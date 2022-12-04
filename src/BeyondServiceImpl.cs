@@ -192,14 +192,16 @@ namespace Beyond
             var peers = await LocatePeers(k);
             if (!peers.Any())
                 return new Block();
-            var blks = new List<Block>();
+            var tblks = new List<Task<Block>>();
             foreach (var p in peers)
             {
                 if (p == null)
-                    blks.Add(await GetBlock(k, ctx));
+                    tblks.Add(GetBlock(k, ctx));
                 else
-                    blks.Add(await p.client.GetBlockAsync(k));
+                    tblks.Add(p.client.GetBlockAsync(k).ResponseAsync);
             }
+            await Task.WhenAll(tblks);
+            var blks = tblks.Select(x=>x.Result).ToList();
             var vmax = blks.Max(b => b.Version);
             // FIXME repair
             // FIXME quorum check
