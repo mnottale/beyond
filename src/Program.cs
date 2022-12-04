@@ -3,51 +3,52 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.IO;
+using McMaster.Extensions.CommandLineUtils;
 
 namespace Beyond
 {
     class Program
     {
-        static void Main(string[] args)
+        [Option("--mount")]
+        public string Mount { get; }
+        [Option("--serve")]
+        public string Serve { get; }
+        [Option("--create")]
+        public bool Create { get; }
+        [Option("--key")]
+        public string Key { get; }
+        [Option("--peers")]
+        public string Peers { get; }
+        [Option("--client-cert")]
+        public string ClientCert { get; }
+        [Option("--port")]
+        public int Port { get; }
+        [Option("--replication")]
+        public int Replication { get; } = 1;
+        static void Main(string[] args) => CommandLineApplication.Execute<Program>(args);
+        
+        protected async Task OnExecuteAsync(CancellationToken token)
         {
-            if (args.Length == 0 || args[0] == "-h" || args[0] == "--help")
-            {
-                Console.WriteLine(@"Usage:
-  beyond mount [--create] [--key KEY_FILE ROOT_CA] MOUNTPOINT NODE_HOST:NODE_PORT
-  beyond serve [--node-key KEY_FILE ROOT_CA_FILE] [--client-cert CERT_FILE] ROOT_PATH PORT [PEERS...]
-                    ");
-                return;
-            }
             GrpcEnvironment.SetLogger(new Grpc.Core.Logging.ConsoleLogger());
-            string mode = args[0];
-            int argp = 1;
-            if (mode == "mount")
+            if (!string.IsNullOrEmpty(Mount))
             {
-                bool create = false;
-                if (args[argp] == "--create")
-                {
-                    create = true;
-                    argp++;
-                }
                 string key = null;
                 string cert = null;
                 string rootCA = null;
-                if (args[argp] == "--key")
+                if (!string.IsNullOrEmpty(Key))
                 {
-                    argp++;
-                    key = File.ReadAllText(args[argp]);
-                    var certName = args[argp].Substring(0, args[argp].Length-4)+".crt";
+                    var kr = Key.Split(',');
+                    key = File.ReadAllText(kr[0]);
+                    var certName = kr[0].Substring(0, kr[0].Length-4)+".crt";
                     cert = File.ReadAllText(certName);
-                    argp++;
-                    rootCA = File.ReadAllText(args[argp++]);
+                    rootCA = File.ReadAllText(kr[1]);
                 }
-                var mountPoint = args[argp++];
-                var serverAddress = args[argp++];
+                var mountPoint = Mount;
+                var serverAddress = Peers;
                 Console.WriteLine($"Will mount on {mountPoint} and connect to {serverAddress}");
-                var fsargs = new string[args.Length-argp];
-                Array.Copy(args, argp, fsargs, 0, args.Length-argp);
                 Channel channel = null;
                 if (key != null)
                     channel = new Channel(serverAddress,
@@ -60,77 +61,76 @@ namespace Beyond
                     channel = new Channel(serverAddress, ChannelCredentials.Insecure);
                 var bclient = new BeyondClient.BeyondClientClient(channel);
                 var fs = new FileSystem(bclient);
-                if (create)
+                if (Create)
                     fs.MkFS();
-                fs.Run(mountPoint, fsargs);
+                fs.Run(mountPoint, new string[] {});
                 return;
             }
-            // node mode
-            string nodeKey = null;
-            string nodeCert = null;
-            string nodeRootCA = null;
-            string clientCert = null;
-            if (args[argp] == "--node-key")
+            else if (!string.IsNullOrEmpty(Serve))
             {
-                argp++;
-                nodeKey = File.ReadAllText(args[argp]);
-                var certName = args[argp].Substring(0, args[argp].Length-4)+".crt";
-                nodeCert = File.ReadAllText(certName);
-                argp++;
-                nodeRootCA = File.ReadAllText(args[argp++]);
-            }
-            if (args[argp] == "--client-cert")
-            {
-                argp++;
-                clientCert = File.ReadAllText(args[argp++]);
-            }
-            string path = args[argp++];
-            int Port = Int32.Parse(args[argp++]);
+                // node mode
+                string nodeKey = null;
+                string nodeCert = null;
+                string nodeRootCA = null;
+                string clientCert = null;
+                if (!string.IsNullOrEmpty(Key))
+                {
+                    var kr = Key.Split(',');
+                    nodeKey = File.ReadAllText(kr[0]);
+                    var certName = kr[0].Substring(0, kr[0].Length-4)+".crt";
+                    nodeCert = File.ReadAllText(certName);
+                    nodeRootCA = File.ReadAllText(kr[1]);
+                }
+                if (!string.IsNullOrEmpty(ClientCert))
+                {
+                    clientCert = File.ReadAllText(ClientCert);
+                }
+                string path = Serve;
 
-            var service = new BeyondServiceImpl(path, new List<string>{"localhost"}, Port, 1);
-            var client = new BeyondClientImpl(service);
-            ServerCredentials nodeServerCredentials = ServerCredentials.Insecure;
-            if (nodeKey != null)
-            {
-                nodeServerCredentials = new SslServerCredentials(
-                    new List<KeyCertificatePair> { new KeyCertificatePair(nodeCert, nodeKey) },
-                    nodeRootCA,
-                    SslClientCertificateRequestType.RequestAndRequireAndVerify
+                var service = new BeyondServiceImpl(path, new List<string>{"localhost"}, Port, Replication);
+                var client = new BeyondClientImpl(service);
+                ServerCredentials nodeServerCredentials = ServerCredentials.Insecure;
+                if (nodeKey != null)
+                {
+                    nodeServerCredentials = new SslServerCredentials(
+                        new List<KeyCertificatePair> { new KeyCertificatePair(nodeCert, nodeKey) },
+                        nodeRootCA,
+                        SslClientCertificateRequestType.RequestAndRequireAndVerify
+                        );
+                }
+                Server server = new Server
+                {
+                    Services = { BeyondNode.BindService(service) },
+                    Ports = { new ServerPort("localhost", Port, nodeServerCredentials) }
+                };
+                server.Start();
+
+                ServerCredentials clientServerCredentials = ServerCredentials.Insecure;
+                if (clientCert != null)
+                {
+                    clientServerCredentials = new SslServerCredentials(
+                        new List<KeyCertificatePair> {new KeyCertificatePair(nodeCert, nodeKey) },
+                        clientCert,
+                        SslClientCertificateRequestType.RequestAndRequireAndVerify
                     );
-            }
-            Server server = new Server
-            {
-                Services = { BeyondNode.BindService(service) },
-                Ports = { new ServerPort("localhost", Port, nodeServerCredentials) }
-            };
-            server.Start();
+                }
+                Server server2 = new Server
+                {
+                    Services = { BeyondClient.BindService(client) },
+                    Ports = { new ServerPort("localhost", Port+1, clientServerCredentials) }
+                };
 
-            ServerCredentials clientServerCredentials = ServerCredentials.Insecure;
-            if (clientCert != null)
-            {
-                clientServerCredentials = new SslServerCredentials(
-                    new List<KeyCertificatePair> {new KeyCertificatePair(nodeCert, nodeKey) },
-                    clientCert,
-                    SslClientCertificateRequestType.RequestAndRequireAndVerify
-                    );
+                server2.Start();
+                _ = service.Connect(Peers);
+                Console.WriteLine("RouteGuide server listening on port " + Port);
+                Console.WriteLine("Press any key to stop the server...");
+                Console.ReadKey();
+                    
+                server.ShutdownAsync().Wait();
+                server2.ShutdownAsync().Wait();
             }
-            Server server2 = new Server
-            {
-                Services = { BeyondClient.BindService(client) },
-                Ports = { new ServerPort("localhost", Port+1, clientServerCredentials) }
-            };
-
-            server2.Start();
-            for (var i = 3; i < args.Length; i++)
-            {
-                _ = service.Connect(args[i]);
-            }
-            Console.WriteLine("RouteGuide server listening on port " + Port);
-            Console.WriteLine("Press any key to stop the server...");
-            Console.ReadKey();
-
-            server.ShutdownAsync().Wait();
-            server2.ShutdownAsync().Wait();
+            else
+                throw new System.Exception("--serve or --mount must be specified");
         }
     }
 }
