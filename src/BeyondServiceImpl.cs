@@ -190,15 +190,21 @@ namespace Beyond
         public async Task<Block> Query(Key k, ServerCallContext ctx)
         {
             var peers = await LocatePeers(k);
-            if (peers.Contains(null))
-                return await GetBlock(k, ctx);
+            if (!peers.Any())
+                return new Block();
+            var blks = new List<Block>();
             foreach (var p in peers)
             {
-                var b = await p.client.GetBlockAsync(k);
-                if (b.Version > 0)
-                    return b;
+                if (p == null)
+                    blks.Add(await GetBlock(k, ctx));
+                else
+                    blks.Add(await p.client.GetBlockAsync(k));
             }
-            return new Block();
+            var vmax = blks.Max(b => b.Version);
+            // FIXME repair
+            // FIXME quorum check
+            var anymax = blks.Find(b => b.Version == vmax);
+            return anymax;
         }
         public async Task<Error> TransactionalUpdate(BlockAndKey bak, ServerCallContext ctx)
         {
