@@ -141,7 +141,7 @@ namespace Beyond
         public override async Task<Error> AcquireLock(Lock lk, ServerCallContext ctx)
         {
             var current = storage.VersionOf(lk.Target);
-            if (current != lk.Version -1)
+            if (current > lk.Version -1) // silently accept if we are behind
             {
                 logger.LogInformation("AcquireLock failure: {current} vs {requested}", current, lk.Version);
                 return Utils.ErrorFromCode(Error.Types.ErrorCode.Outdated, current);
