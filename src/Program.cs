@@ -16,7 +16,7 @@ namespace Beyond
             {
                 Console.WriteLine(@"Usage:
   beyond mount [--create] [--key KEY_FILE ROOT_CA] MOUNTPOINT NODE_HOST:NODE_PORT
-  beyond serve [--node-key KEY_FILE ROOT_CA_FILE] [--client-cert CERT_FILE] ROOT_PATH PORT
+  beyond serve [--node-key KEY_FILE ROOT_CA_FILE] [--client-cert CERT_FILE] ROOT_PATH PORT [PEERS...]
                     ");
                 return;
             }
@@ -121,9 +121,9 @@ namespace Beyond
             };
 
             server2.Start();
-            if (args.Length > 3)
+            for (var i = 3; i < args.Length; i++)
             {
-                _ = service.Connect(args[3]);
+                _ = service.Connect(args[i]);
             }
             Console.WriteLine("RouteGuide server listening on port " + Port);
             Console.WriteLine("Press any key to stop the server...");

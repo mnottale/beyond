@@ -138,7 +138,7 @@ namespace Beyond
             if (current != lk.Version -1)
             {
                 logger.LogInformation("AcquireLock failure: {current} vs {requested}", current, lk.Version);
-                return Utils.ErrorFromCode(Error.Types.ErrorCode.Outdated);
+                return Utils.ErrorFromCode(Error.Types.ErrorCode.Outdated, current);
             }
             if (locks.ContainsKey(lk.Target))
                 return Utils.ErrorFromCode(Error.Types.ErrorCode.AlreadyLocked);
@@ -151,6 +151,12 @@ namespace Beyond
                 locks.TryRemove(lk.Target, out _);
             locks.TryAdd(lk.Target, lk.LockUid);
             return Utils.ErrorFromCode(Error.Types.ErrorCode.Ok);
+        }
+        public override Task<Error> ReleaseLock(Lock lk, ServerCallContext ctx)
+        {
+            if (locks.TryGetValue(lk.Target, out var uid) && uid.Equals(lk.LockUid))
+                locks.TryRemove(lk.Target, out _);
+            return Task.FromResult(Utils.ErrorFromCode(Error.Types.ErrorCode.Ok));
         }
         public override async Task<Error> Write(BlockAndKey bak, ServerCallContext ctx)
         {
@@ -208,6 +214,7 @@ namespace Beyond
                     tasks.Add(p.client.AcquireLockAsync(lk).ResponseAsync);
             }
             await Task.WhenAll(tasks);
+            var failCode = Error.Types.ErrorCode.Ok;
             for (var i=0; i<tasks.Count; i++)
             {
                 var res = await tasks[i];
@@ -216,10 +223,17 @@ namespace Beyond
                 else if (res.Code == Error.Types.ErrorCode.AlreadyLocked)
                     failed.Add(peers[i]);
                 else
-                    return Utils.ErrorFromCode(res.Code);
+                    failCode = res.Code;
             }
-            if (acquired.Count < replicationFactor / 2 + 1)
-               return Utils.ErrorFromCode(Error.Types.ErrorCode.Conflict);
+            if (failCode != Error.Types.ErrorCode.Ok
+                || acquired.Count < replicationFactor / 2 + 1)
+            {
+                foreach (var ack in acquired)
+                   await ack.client.ReleaseLockAsync(lk);
+                return Utils.ErrorFromCode(
+                    failCode == Error.Types.ErrorCode.Ok?
+                    Error.Types.ErrorCode.Conflict : failCode);
+            }
             tasks.Clear();
             foreach (var p in failed)
             {

@@ -19,6 +19,7 @@ service BeyondNode {
 
    // local queries
    rpc AcquireLock(Lock) returns (Error) {}
+   rpc ReleaseLock(Lock) returns (Error) {}
    rpc ForceAcquireLock(Lock) returns (Error) {}
    rpc Write(BlockAndKey) returns (Error) {}
    rpc WriteAndRelease(BlockAndLock) returns (Error) {}
@@ -48,6 +49,7 @@ message Error {
     CONFLICT = 5;
   }
   ErrorCode code = 1;
+  int64 currentVersion = 2;
 }
 message BlockAndKey {
   Key key = 1;

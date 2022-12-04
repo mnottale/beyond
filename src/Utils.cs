@@ -24,10 +24,11 @@ namespace Beyond
                 res.Add(candidates[idx]);
             return res;
         }
-        public static Error ErrorFromCode(Error.Types.ErrorCode erc)
+        public static Error ErrorFromCode(Error.Types.ErrorCode erc, long cv=0)
         {
             var res = new Error();
             res.Code = erc;
+            res.CurrentVersion = cv;
             return res;
         }
         public static Key RandomKey()
