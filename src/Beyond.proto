@@ -85,11 +85,17 @@ message Blob {
   bytes blob = 1;
 }
 
+message BlockOwnership {
+  repeated Key owners = 1;
+  uint64 uptodateMask = 2;
+}
+
 message Block {
   int64 version = 1;
   bytes raw = 2;
   FileIndex file = 3;
   DirectoryIndex directory = 4;
+  BlockOwnership owners = 5;
 }
 
 message FileIndex {

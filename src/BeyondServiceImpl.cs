@@ -120,6 +120,12 @@ namespace Beyond
             var targets = Utils.PickN(candidates, replicationFactor);
             if (targets.Count < replicationFactor/2 + 1)
                 return Utils.ErrorFromCode(Error.Types.ErrorCode.NotEnoughPeers);
+            bak.Block.Owners = new BlockOwnership();
+            foreach (var c in targets)
+            {
+                bak.Block.Owners.Owners.Add(c.info.Id);
+            }
+            bak.Block.Owners.UptodateMask = (ulong)((1 << targets.Count) - 1);
             var tasks = new List<Task<Error>>();
             foreach (var c in targets)
             {
@@ -247,6 +253,15 @@ namespace Beyond
             var bal = new BlockAndLock();
             bal.Lock = lk;
             bal.BlockAndKey = bak;
+            ulong umsk = 0;
+            ulong bit = 0;
+            foreach (var ownerKey in bal.BlockAndKey.Block.Owners.Owners)
+            {
+                if (peers.Find(p => p.info.Id.Equals(ownerKey)) != null)
+                    umsk |= bit;
+                bit <<= 1;
+            }
+            bal.BlockAndKey.Block.Owners.UptodateMask = umsk;
             foreach (var p in peers)
             {
                 if (p == null)
