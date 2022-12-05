@@ -20,6 +20,8 @@ namespace Beyond
         public Peer info;
         public BeyondNode.BeyondNodeClient client;
     }
+    // Horrible horrible hack since we don't control BeyondClientImpl lifetime
+    // anymore.
     internal static class State
     {
         public static int replicationFactor;
