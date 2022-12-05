@@ -36,6 +36,8 @@ namespace Beyond
         public int Port { get; }
         [Option("--replication")]
         public int Replication { get; } = 1;
+        [Option("--fs-name")]
+        public string FsName { get; }
         static void Main(string[] args) => CommandLineApplication.Execute<Program>(args);
         
         protected async Task OnExecuteAsync(CancellationToken token)
@@ -73,6 +75,8 @@ namespace Beyond
                         });
                 var bclient = new BeyondClient.BeyondClientClient(channel);
                 var fs = new FileSystem(bclient);
+                if (!string.IsNullOrEmpty(FsName))
+                    fs.SetFilesystem(FsName);
                 if (Create)
                     fs.MkFS();
                 fs.Run(mountPoint, new string[] {});

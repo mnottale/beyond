@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
 
 using Mono.Fuse.NETStandard;
@@ -29,6 +30,7 @@ namespace Beyond
             public ConcurrentDictionary<ulong, FileChunk> chunks = new ConcurrentDictionary<ulong, FileChunk>();
         };
         ConcurrentDictionary<string, OpenedHandle> openedFiles = new ConcurrentDictionary<string, OpenedHandle>();
+        byte[] rootAddress = new byte[32];
         public FileSystem(BeyondClient.BeyondClientClient client)
         {
             logger = Logger.loggerFactory.CreateLogger<BeyondServiceImpl>();
@@ -46,10 +48,15 @@ namespace Beyond
             root.Block.Directory = new DirectoryIndex();
             client.Insert(root);
         }
+        public void SetFilesystem(string name)
+        {
+            byte[] hashValue = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(name));
+            rootAddress = hashValue;
+        }
         protected Key RootAddress()
         {
             var res = new Key();
-            res.Key_ = Google.Protobuf.ByteString.CopyFrom(new byte[32]);
+            res.Key_ = Google.Protobuf.ByteString.CopyFrom(rootAddress);
             return res;
         }
         protected BlockAndKey GetRoot()
