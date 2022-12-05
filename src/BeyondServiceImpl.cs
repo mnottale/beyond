@@ -5,81 +5,94 @@ using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
-
-using Microsoft.Extensions.Logging;
-
+using Grpc.Net.Client;
 using Grpc.Core;
-using Grpc.Core.Utils;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.DependencyInjection;
 using Google.Protobuf;
 
 namespace Beyond
 {
+    internal class BPeer
+    {
+        public Peer info;
+        public BeyondNode.BeyondNodeClient client;
+    }
+    internal static class State
+    {
+        public static int replicationFactor;
+        public static string rootPath;
+        public static int port;
+
+        public static Storage storage;
+        public static List<BPeer> peers = new List<BPeer>();
+        public static Peer self;
+        public static ConcurrentDictionary<Key, Key> locks = new ConcurrentDictionary<Key, Key>();
+        public static SemaphoreSlim sem = new SemaphoreSlim(1, 1);
+
+        public static BeyondServiceImpl backend;
+    }
     public class BeyondClientImpl: BeyondClient.BeyondClientBase
     {
-        private BeyondServiceImpl backend;
-        public BeyondClientImpl(BeyondServiceImpl backend)
+        public BeyondClientImpl()
         {
-            this.backend = backend;
         }
         public override Task<Error> TransactionalUpdate(BlockAndKey bak, ServerCallContext ctx)
         {
-            return backend.TransactionalUpdate(bak, ctx);
+            return State.backend.TransactionalUpdate(bak, ctx);
         }
         public override Task<Error> Insert(BlockAndKey bak, ServerCallContext ctx)
         {
-            return backend.Insert(bak, ctx);
+            return State.backend.Insert(bak, ctx);
         }
         public override Task<Error> Delete(Key k, ServerCallContext ctx)
         {
-            return backend.Delete(k, ctx);
+            return State.backend.Delete(k, ctx);
         }
         public override Task<Block> Query(Key k, ServerCallContext ctx)
         {
-            return backend.Query(k, ctx);
+            return State.backend.Query(k, ctx);
         }
     }
     public class BeyondServiceImpl : BeyondNode.BeyondNodeBase
     {
-        private class BPeer
-        {
-            public Peer info;
-            public BeyondNode.BeyondNodeClient client;
-        }
-        private int replicationFactor;
-        private Storage storage;
-        private List<BPeer> peers = new List<BPeer>();
-        private Peer self;
+
         private ILogger logger;
         private ConcurrentDictionary<Key, Key> locks = new ConcurrentDictionary<Key, Key>();
-
-        public BeyondServiceImpl(string rootPath, List<string> hosts, int port, int replicationFactor)
+        private SemaphoreSlim sem = new SemaphoreSlim(1, 1);
+        public BeyondServiceImpl(ILogger<BeyondServiceImpl> logger)
         {
-            logger = Logger.loggerFactory.CreateLogger<BeyondServiceImpl>();
-            storage = new Storage(rootPath + "/data");
-            self = new Peer();
-            try
+            this.logger = logger;
+            if (State.storage == null)
             {
-                var idBuf = File.ReadAllBytes(rootPath + "/identity");
-                using (var ms = new MemoryStream(idBuf))
+                State.storage = new Storage(State.rootPath + "/data");
+                State.self = new Peer();
+                try
+                {
+                    var idBuf = File.ReadAllBytes(State.rootPath + "/identity");
+                    using (var ms = new MemoryStream(idBuf))
                 {
                     var key = Key.Parser.ParseFrom(idBuf);
-                    self.Id = key;
+                    State.self.Id = key;
                 }
+                }
+                catch (Exception)
+                {
+                    logger.LogInformation("Generating key");
+                    State.self.Id = Utils.RandomKey();
+                    var serialized = State.self.Id.ToByteArray();
+                    File.WriteAllBytes(State.rootPath + "/identity", serialized);
+                }
+                State.self.Addresses.Add("localhost");
+                State.self.Port = State.port;
             }
-            catch (Exception)
-            {
-                logger.LogInformation("Generating key");
-                self.Id = Utils.RandomKey();
-            }
-            self.Addresses.Add(hosts);
-            self.Port = port;
-            this.replicationFactor = replicationFactor;
         }
         private async Task<List<BPeer>> LocatePeers(Key key)
         {
             var tasks = new List<AsyncUnaryCall<Error>>();
-            foreach (var p in peers)
+            foreach (var p in State.peers)
             {
                 tasks.Add(p.client.HasBlockAsync(key));
             }
@@ -88,9 +101,9 @@ namespace Beyond
             for (var i=0; i< tasks.Count; ++i)
             {
                 if ((await tasks[i]).Code == Error.Types.ErrorCode.Ok)
-                    res.Add(peers[i]);
+                    res.Add(State.peers[i]);
             }
-            if (storage.Has(key))
+            if (State.storage.Has(key))
                 res.Add(null);
             return res;
         }
@@ -98,7 +111,7 @@ namespace Beyond
         {
             var peers = await LocatePeers(k);
             var tasks = new List<Task<Error>>();
-            foreach (var p in peers)
+            foreach (var p in State.peers)
             {
                 if (p == null)
                     tasks.Add(DeleteBlock(k, ctx));
@@ -110,20 +123,23 @@ namespace Beyond
         }
         public override async Task<Error> DeleteBlock(Key k, ServerCallContext ctx)
         {
-            storage.Delete(k);
+            State.storage.Delete(k);
             return Utils.ErrorFromCode(Error.Types.ErrorCode.Ok);
         }
         public async Task<Error> Insert(BlockAndKey bak, ServerCallContext ctx)
         {
-            List<BPeer> candidates = new List<BPeer>(peers);
+            List<BPeer> candidates = new List<BPeer>(State.peers);
             candidates.Add(null); // me
-            var targets = Utils.PickN(candidates, replicationFactor);
-            if (targets.Count < replicationFactor/2 + 1)
+            var targets = Utils.PickN(candidates, State.replicationFactor);
+            if (targets.Count < State.replicationFactor/2 + 1)
                 return Utils.ErrorFromCode(Error.Types.ErrorCode.NotEnoughPeers);
             bak.Block.Owners = new BlockOwnership();
             foreach (var c in targets)
             {
-                bak.Block.Owners.Owners.Add(c.info.Id);
+                if (c == null)
+                    bak.Block.Owners.Owners.Add(State.self.Id);
+                else
+                    bak.Block.Owners.Owners.Add(c.info.Id);
             }
             bak.Block.Owners.UptodateMask = (ulong)((1 << targets.Count) - 1);
             var tasks = new List<Task<Error>>();
@@ -140,50 +156,50 @@ namespace Beyond
         }
         public override async Task<Error> AcquireLock(Lock lk, ServerCallContext ctx)
         {
-            var current = storage.VersionOf(lk.Target);
+            var current = State.storage.VersionOf(lk.Target);
             if (current > lk.Version -1) // silently accept if we are behind
             {
                 logger.LogInformation("AcquireLock failure: {current} vs {requested}", current, lk.Version);
                 return Utils.ErrorFromCode(Error.Types.ErrorCode.Outdated, current);
             }
-            if (locks.ContainsKey(lk.Target))
+            if (State.locks.ContainsKey(lk.Target))
                 return Utils.ErrorFromCode(Error.Types.ErrorCode.AlreadyLocked);
-            locks.TryAdd(lk.Target, lk.LockUid);
+            State.locks.TryAdd(lk.Target, lk.LockUid);
             return Utils.ErrorFromCode(Error.Types.ErrorCode.Ok);
         }
         public override async Task<Error> ForceAcquireLock(Lock lk, ServerCallContext ctx)
         {
-            if (locks.ContainsKey(lk.Target))
-                locks.TryRemove(lk.Target, out _);
-            locks.TryAdd(lk.Target, lk.LockUid);
+            if (State.locks.ContainsKey(lk.Target))
+                State.locks.TryRemove(lk.Target, out _);
+            State.locks.TryAdd(lk.Target, lk.LockUid);
             return Utils.ErrorFromCode(Error.Types.ErrorCode.Ok);
         }
         public override Task<Error> ReleaseLock(Lock lk, ServerCallContext ctx)
         {
-            if (locks.TryGetValue(lk.Target, out var uid) && uid.Equals(lk.LockUid))
-                locks.TryRemove(lk.Target, out _);
+            if (State.locks.TryGetValue(lk.Target, out var uid) && uid.Equals(lk.LockUid))
+                State.locks.TryRemove(lk.Target, out _);
             return Task.FromResult(Utils.ErrorFromCode(Error.Types.ErrorCode.Ok));
         }
         public override async Task<Error> Write(BlockAndKey bak, ServerCallContext ctx)
         {
             var serialized = bak.Block.ToByteArray();
-            storage.Put(bak.Key, serialized);
+            State.storage.Put(bak.Key, serialized);
             return Utils.ErrorFromCode(Error.Types.ErrorCode.Ok);
         }
         public override async Task<Error> WriteAndRelease(BlockAndLock bal, ServerCallContext ctx)
         {
             var serialized = bal.BlockAndKey.Block.ToByteArray();
-            storage.Put(bal.BlockAndKey.Key, serialized);
-            if (locks.TryGetValue(bal.Lock.Target, out var lkId))
+            State.storage.Put(bal.BlockAndKey.Key, serialized);
+            if (State.locks.TryGetValue(bal.Lock.Target, out var lkId))
             {
                 if (lkId.Equals(bal.Lock.LockUid))
-                    locks.TryRemove(bal.Lock.Target, out _);
+                    State.locks.TryRemove(bal.Lock.Target, out _);
             }
             return Utils.ErrorFromCode(Error.Types.ErrorCode.Ok);
         }
         public override async Task<Block> GetBlock(Key k, ServerCallContext ctx)
         {
-            var raw = storage.Get(k);
+            var raw = State.storage.Get(k);
             using var ms = new MemoryStream(raw);
             return Block.Parser.ParseFrom(ms);
         }
@@ -215,7 +231,7 @@ namespace Beyond
             lk.Version = bak.Block.Version;
             lk.LockUid = Utils.RandomKey();
             var peers = await LocatePeers(bak.Key);
-            if (peers.Count < replicationFactor / 2 + 1)
+            if (peers.Count < State.replicationFactor / 2 + 1)
                 return Utils.ErrorFromCode(Error.Types.ErrorCode.NotEnoughPeers);
             var acquired = new List<BPeer>();
             var failed = new List<BPeer>();
@@ -240,7 +256,7 @@ namespace Beyond
                     failCode = res.Code;
             }
             if (failCode != Error.Types.ErrorCode.Ok
-                || acquired.Count < replicationFactor / 2 + 1)
+                || acquired.Count < State.replicationFactor / 2 + 1)
             {
                 foreach (var ack in acquired)
                    await ack.client.ReleaseLockAsync(lk);
@@ -263,13 +279,18 @@ namespace Beyond
             bal.BlockAndKey = bak;
             ulong umsk = 0;
             ulong bit = 0;
-            foreach (var ownerKey in bal.BlockAndKey.Block.Owners.Owners)
+            if (bal.BlockAndKey.Block.Owners != null)
             {
-                if (peers.Find(p => p.info.Id.Equals(ownerKey)) != null)
-                    umsk |= bit;
-                bit <<= 1;
+                foreach (var ownerKey in bal.BlockAndKey.Block.Owners.Owners)
+                {
+                    if (peers.Find(p => 
+                        (p == null && State.self.Id.Equals(ownerKey != null))
+                    || (p != null && p.info.Id.Equals(ownerKey))) != null)
+                        umsk |= bit;
+                    bit <<= 1;
+                }
+                bal.BlockAndKey.Block.Owners.UptodateMask = umsk;
             }
-            bal.BlockAndKey.Block.Owners.UptodateMask = umsk;
             foreach (var p in peers)
             {
                 if (p == null)
@@ -286,13 +307,21 @@ namespace Beyond
         }
         public async Task Connect(string hostport)
         {
-            var channel = new Channel(hostport, ChannelCredentials.Insecure);
+            logger.LogInformation("Connecting to peer at {hostport}", hostport);
+            var channel = GrpcChannel.ForAddress("http://" + hostport, new GrpcChannelOptions
+                {
+                    Credentials = ChannelCredentials.Insecure
+                });
+            logger.LogInformation("  got channel to peer at {hostport}", hostport);
             var client = new BeyondNode.BeyondNodeClient(channel);
+            logger.LogInformation("  got client to peer at {hostport}", hostport);
             var desc = await client.DescribeAsync(new Void());
+            logger.LogInformation("  got desc to peer at {hostport}", hostport);
             var hit = false;
-            foreach (var p in peers)
+            await State.sem.WaitAsync();
+            foreach (var p in State.peers)
             {
-                if (p.info.Id == desc.Id)
+                if (p.info.Id.Equals(desc.Id))
                 {
                     p.info = desc;
                     hit = true;
@@ -300,23 +329,44 @@ namespace Beyond
                 }
             }
             if (!hit)
-                peers.Add(new BPeer { info = desc, client = client});
-            await client.AnnounceAsync(self);
-            logger.LogInformation("Connected to peer at {host} {port}", desc.Addresses[0], desc.Port);
+                State.peers.Add(new BPeer { info = desc, client = client});
+            var infos = State.peers.Select(x=>x.info).ToList();
+            State.sem.Release();
+            logger.LogInformation("Connected to peer at {host} {port} {hit}", desc.Addresses[0], desc.Port, hit);
+            _ = Task.Delay(200).ContinueWith(async _ =>
+                {
+                    await client.AnnounceAsync(State.self);
+                    foreach (var p in infos)
+                    {
+                        await client.AnnounceAsync(p);
+                    }
+                });
+            logger.LogInformation("Done anouncing peers to {host} {port}", desc.Addresses[0], desc.Port);
         }
         public override Task<Peer> Describe(Void v, ServerCallContext ctx)
         {
-            return Task.FromResult(self);
+            logger.LogInformation("Received describe() call");
+            return Task.FromResult(State.self);
         }
-        public override Task<Void> Announce(Peer peer, ServerCallContext ctx)
+        public override async Task<Void> Announce(Peer peer, ServerCallContext ctx)
         {
-            _ = Connect(peer.Addresses[0], peer.Port);
-            return Task.FromResult(new Void());
+            await State.sem.WaitAsync();
+            if (State.peers.Find(p=>p.info.Id.Equals(peer.Id)) != null
+                || State.self.Id.Equals(peer.Id))
+            {
+                logger.LogInformation("Dropping announce from known peer {host} {port}", peer.Addresses[0], peer.Port);
+                State.sem.Release();
+                return new Void();
+            }
+            logger.LogInformation("Handling announce from new peer {host} {port}", peer.Addresses[0], peer.Port);
+            _ = Task.Delay(100).ContinueWith(_ => Connect(peer.Addresses[0], peer.Port));
+            State.sem.Release();
+            return new Void();
         }
         public override Task<Peers> GetPeers(Void v, ServerCallContext ctx)
         {
             var res = new Peers();
-            foreach (var p in peers)
+            foreach (var p in State.peers)
             {
                 res.Peers_.Add(p.info);
             }
@@ -324,19 +374,19 @@ namespace Beyond
         }
         public override Task<Blob> Get(Key k, ServerCallContext ctx)
         {
-            var data = storage.Get(k);
+            var data = State.storage.Get(k);
             var res = new Blob();
             res.Blob_ = Google.Protobuf.ByteString.CopyFrom(data);
             return Task.FromResult(res);
         }
         public override Task<Void> Put(PutArgs pa, ServerCallContext ctx)
         {
-            storage.Put(pa.Key, pa.Blob.Blob_.ToByteArray());
+            State.storage.Put(pa.Key, pa.Blob.Blob_.ToByteArray());
             return Task.FromResult(new Void());
         }
         public override Task<Error> HasBlock(Key key, ServerCallContext ctx)
         {
-            if (storage.Has(key))
+            if (State.storage.Has(key))
                 return Task.FromResult(Utils.ErrorFromCode(Error.Types.ErrorCode.Ok));
             else
                 return Task.FromResult(Utils.ErrorFromCode(Error.Types.ErrorCode.KeyNotFound));

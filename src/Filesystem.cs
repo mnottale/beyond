@@ -522,6 +522,7 @@ namespace Beyond
 		            && res.Code != Error.Types.ErrorCode.Conflict
 		        && res.Code !=  Error.Types.ErrorCode.Outdated)
 		          return Errno.EIO;
+		        logger.LogInformation("Flush retry from {version}", oh.fileBlock.Block.Version);
 		        var current = client.Query(oh.fileBlock.Key);
 		        oh.fileBlock.Block.Version = current.Version + 1;
 		    }

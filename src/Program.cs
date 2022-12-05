@@ -1,3 +1,4 @@
+using Grpc.Net.Client;
 using Grpc.Core;
 using System;
 using System.Collections.Generic;
@@ -7,6 +8,13 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.IO;
 using McMaster.Extensions.CommandLineUtils;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.AspNetCore;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.Extensions.Hosting;
 
 namespace Beyond
 {
@@ -32,7 +40,7 @@ namespace Beyond
         
         protected async Task OnExecuteAsync(CancellationToken token)
         {
-            GrpcEnvironment.SetLogger(new Grpc.Core.Logging.ConsoleLogger());
+            //GrpcEnvironment.SetLogger(new Grpc.Core.Logging.ConsoleLogger());
             if (!string.IsNullOrEmpty(Mount))
             {
                 string key = null;
@@ -49,16 +57,20 @@ namespace Beyond
                 var mountPoint = Mount;
                 var serverAddress = Peers;
                 Console.WriteLine($"Will mount on {mountPoint} and connect to {serverAddress}");
-                Channel channel = null;
+                GrpcChannel channel = null;
                 if (key != null)
-                    channel = new Channel(serverAddress,
-                        new SslCredentials(
-                            rootCA,
-                            new KeyCertificatePair(cert, key)
-                            )
-                        );
+                    channel = GrpcChannel.ForAddress(serverAddress, new GrpcChannelOptions
+                        {
+                            Credentials = new SslCredentials(
+                                rootCA,
+                                new KeyCertificatePair(cert, key)
+                                )
+                        });
                 else
-                    channel = new Channel(serverAddress, ChannelCredentials.Insecure);
+                    channel = GrpcChannel.ForAddress(serverAddress, new GrpcChannelOptions
+                        {
+                            Credentials = ChannelCredentials.Insecure,
+                        });
                 var bclient = new BeyondClient.BeyondClientClient(channel);
                 var fs = new FileSystem(bclient);
                 if (Create)
@@ -87,9 +99,40 @@ namespace Beyond
                 }
                 string path = Serve;
 
-                var service = new BeyondServiceImpl(path, new List<string>{"localhost"}, Port, Replication);
-                var client = new BeyondClientImpl(service);
-                ServerCredentials nodeServerCredentials = ServerCredentials.Insecure;
+                State.replicationFactor = Replication;
+                State.rootPath = Serve;
+                State.port = Port;
+                State.backend = new BeyondServiceImpl(Logger.loggerFactory.CreateLogger<BeyondServiceImpl>());
+                //var client = new BeyondClientImpl();
+                var builder = WebApplication.CreateBuilder();
+                builder.Services.AddGrpc();
+                builder.WebHost.UseUrls($"http://localhost:{Port}");
+                builder.WebHost.ConfigureKestrel((options) =>
+                    {
+                        // trying to use Http1AndHttp2 causes http2 connections to fail with invalid protocol error
+                        // according to Microsoft dual http version mode not supported in unencrypted scenario: https://learn.microsoft.com/en-us/aspnet/core/grpc/troubleshoot?view=aspnetcore-3.0
+                        options.ConfigureEndpointDefaults(lo => lo.Protocols = HttpProtocols.Http2);
+                    });
+                var app = builder.Build();
+                app.MapGrpcService<BeyondServiceImpl>();
+                app.MapGrpcService<BeyondClientImpl>();
+                if (!string.IsNullOrEmpty(Peers))
+                {
+                    _ = Task.Delay(100).ContinueWith(async _ =>
+                        {
+                            try
+                            {
+                                await State.backend.Connect(Peers);
+                            }
+                            catch(Exception e)
+                            {
+                                Logger.loggerFactory.CreateLogger<Program>().LogError(e, "bronk connecting"); 
+                            }
+                        });
+                }
+                app.Run();
+                /*
+                GrpcServerCredentials nodeServerCredentials = ServerCredentials.Insecure;
                 if (nodeKey != null)
                 {
                     nodeServerCredentials = new SslServerCredentials(
@@ -128,6 +171,7 @@ namespace Beyond
                     
                 server.ShutdownAsync().Wait();
                 server2.ShutdownAsync().Wait();
+                */
             }
             else
                 throw new System.Exception("--serve or --mount must be specified");

@@ -9,7 +9,8 @@
     <PackageReference Include="Microsoft.Extensions.Logging" Version="5.0.0" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="5.0.0" />
     <PackageReference Include="Google.Protobuf" Version="3.21.10" />
-    <PackageReference Include="Grpc" Version="2.46.5" />
+    <PackageReference Include="Grpc.AspNetCore" Version="2.47.0" />
+    <PackageReference Include="Grpc.Net.Client" Version="2.47.0" />
     <PackageReference Include="Grpc.Tools" Version="2.50.0" PrivateAssets="All" />
     <PackageReference Include="Newtonsoft.Json" Version="9.0.1" />
     <PackageReference Include="McMaster.Extensions.CommandLineUtils" Version="4.0.1" />
@@ -17,6 +18,12 @@
   <ItemGroup>
     <ProjectReference Include="../Mono.Fuse.NETStandard/Mono.Fuse.NETStandard/Mono.Fuse.NETStandard.csproj" />
   </ItemGroup>
+    <ItemGroup>
+    <None Include="..\Mono.Fuse.NETStandard\nativelibs\linux-x64\libMonoFuseHelper.so">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
   <ItemGroup>
     <Protobuf Include="./Beyond.proto" Link="Beyond.proto" GrpcServices="Both"/>
   </ItemGroup>
