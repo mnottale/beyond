@@ -47,6 +47,7 @@ message Error {
     KEY_NOT_FOUND = 3;
     NOT_ENOUGH_PEERS = 4;
     CONFLICT = 5;
+    EXCEPTION_THROWN = 6;
   }
   ErrorCode code = 1;
   int64 currentVersion = 2;

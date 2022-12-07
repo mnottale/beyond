@@ -93,12 +93,12 @@ namespace Beyond
         }
         private async Task<List<BPeer>> LocatePeers(Key key)
         {
-            var tasks = new List<AsyncUnaryCall<Error>>();
+            var tasks = new List<Task<Error>>();
             foreach (var p in State.peers)
             {
-                tasks.Add(p.client.HasBlockAsync(key));
+                tasks.Add(Wrap(p, p.client.HasBlockAsync(key).ResponseAsync));
             }
-            await Task.WhenAll(tasks.Select(x=>x.ResponseAsync));
+            await Task.WhenAll(tasks);
             var res = new List<BPeer>();
             for (var i=0; i< tasks.Count; ++i)
             {
@@ -218,13 +218,32 @@ namespace Beyond
                 else
                     tblks.Add(p.client.GetBlockAsync(k).ResponseAsync);
             }
-            await Task.WhenAll(tblks);
-            var blks = tblks.Select(x=>x.Result).ToList();
+            try
+            {
+                await Task.WhenAll(tblks);
+            }
+            catch (Exception e)
+            {
+            }
+            var blks = tblks.Where(x=>!x.IsFaulted).Select(x=>x.Result).ToList();
             var vmax = blks.Max(b => b.Version);
             // FIXME repair
             // FIXME quorum check
             var anymax = blks.Find(b => b.Version == vmax);
             return anymax;
+        }
+        private async Task<Error> Wrap(BPeer peer, Task<Error> tsk)
+        { // FIXME filter exception
+            try
+            {
+                return await tsk;
+            }
+            catch (Exception e)
+            {
+                logger.LogError(e, "exception in call");
+                State.peers.Remove(peer);
+                return Utils.ErrorFromCode(Error.Types.ErrorCode.ExceptionThrown);
+            }
         }
         public async Task<Error> TransactionalUpdate(BlockAndKey bak, ServerCallContext ctx)
         {
@@ -243,7 +262,7 @@ namespace Beyond
                 if (p == null)
                     tasks.Add(AcquireLock(lk, ctx));
                 else
-                    tasks.Add(p.client.AcquireLockAsync(lk).ResponseAsync);
+                    tasks.Add(Wrap(p, p.client.AcquireLockAsync(lk).ResponseAsync));
             }
             await Task.WhenAll(tasks);
             var failCode = Error.Types.ErrorCode.Ok;
@@ -261,7 +280,7 @@ namespace Beyond
                 || acquired.Count < State.replicationFactor / 2 + 1)
             {
                 foreach (var ack in acquired)
-                   await ack.client.ReleaseLockAsync(lk);
+                   await Wrap(ack, ack.client.ReleaseLockAsync(lk).ResponseAsync);
                 return Utils.ErrorFromCode(
                     failCode == Error.Types.ErrorCode.Ok?
                     Error.Types.ErrorCode.Conflict : failCode);
@@ -272,7 +291,7 @@ namespace Beyond
                 if (p == null)
                     tasks.Add(ForceAcquireLock(lk, ctx));
                 else
-                    tasks.Add(p.client.ForceAcquireLockAsync(lk).ResponseAsync);
+                    tasks.Add(Wrap(p, p.client.ForceAcquireLockAsync(lk).ResponseAsync));
             }
             await Task.WhenAll(tasks);
             tasks.Clear();
