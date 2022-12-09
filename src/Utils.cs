@@ -52,6 +52,17 @@ namespace Beyond
             }
             return result;
         }
+        public static Key StringKey(string s)
+        {
+            var bytes = new byte[s.Length / 2];
+            for (var i = 0; i < bytes.Length; i++)
+            {
+                bytes[i] = Convert.ToByte(s.Substring(i * 2, 2), 16);
+            }
+            var res = new Key();
+            res.Key_ = Google.Protobuf.ByteString.CopyFrom(bytes);
+            return res;
+        }
         public static string KeyString(Key k)
         {
             return ByteArrayToHexViaLookup32(k.Key_.ToByteArray());

@@ -5,6 +5,8 @@ service BeyondClient {
    rpc Insert(BlockAndKey) returns(Error) {}
    rpc Delete(Key) returns(Error) {}
    rpc Query(Key) returns(Block) {}
+
+   rpc Evict(Key) returns(Error) {}
 }
 
 service BeyondNode {
@@ -26,6 +28,9 @@ service BeyondNode {
    rpc HasBlock(Key) returns (Error) {}
    rpc DeleteBlock(Key) returns (Error) {}
    rpc GetBlock(Key) returns (Block) {}
+
+   // misc
+   rpc ListKeys(Void) returns (KeyList) {}
 }
 
 message Lock {
@@ -85,7 +90,9 @@ message Key {
 message Blob {
   bytes blob = 1;
 }
-
+message KeyList {
+  repeated Key keys = 1;
+}
 message BlockOwnership {
   repeated Key owners = 1;
   uint64 uptodateMask = 2;

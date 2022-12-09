@@ -24,6 +24,8 @@ namespace Beyond
         public string Mount { get; }
         [Option("--serve")]
         public string Serve { get; }
+        [Option("--evict")]
+        public string Evict { get; }
         [Option("--create")]
         public bool Create { get; }
         [Option("--key")]
@@ -81,6 +83,36 @@ namespace Beyond
                     fs.MkFS();
                 fs.Run(mountPoint, new string[] {});
                 return;
+            }
+            else if (!string.IsNullOrEmpty(Evict))
+            {
+                string key = null;
+                string cert = null;
+                string rootCA = null;
+                if (!string.IsNullOrEmpty(Key))
+                {
+                    var kr = Key.Split(',');
+                    key = File.ReadAllText(kr[0]);
+                    var certName = kr[0].Substring(0, kr[0].Length-4)+".crt";
+                    cert = File.ReadAllText(certName);
+                    rootCA = File.ReadAllText(kr[1]);
+                }
+                GrpcChannel channel = null;
+                if (key != null)
+                    channel = GrpcChannel.ForAddress(Peers, new GrpcChannelOptions
+                        {
+                            Credentials = new SslCredentials(
+                                rootCA,
+                                new KeyCertificatePair(cert, key)
+                                )
+                        });
+                else
+                    channel = GrpcChannel.ForAddress(Peers, new GrpcChannelOptions
+                        {
+                            Credentials = ChannelCredentials.Insecure,
+                        });
+                var bclient = new BeyondClient.BeyondClientClient(channel);
+                await bclient.EvictAsync(Utils.StringKey(Evict));
             }
             else if (!string.IsNullOrEmpty(Serve))
             {

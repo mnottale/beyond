@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Collections.Generic;
 
 namespace Beyond
 {
@@ -20,6 +21,20 @@ namespace Beyond
         {
             var skey = Utils.KeyString(key);
             return root + "/" + skey[0]+skey[1]+"/" + skey;
+        }
+        public List<Key> List()
+        {
+            var res = new List<Key>();
+            for (int i = 0; i < 256; i++)
+            {
+                string s=i.ToString("X2");
+                var dir = root + "/" + s;
+                foreach (var f in Directory.GetFiles(dir))
+                {
+                    res.Add(Utils.StringKey(f));
+                }
+            }
+            return res;
         }
         public long VersionOf(Key key)
         {

@@ -35,6 +35,7 @@ namespace Beyond
         public static SemaphoreSlim sem = new SemaphoreSlim(1, 1);
 
         public static BeyondServiceImpl backend;
+        public static ILogger logger;
     }
     public class BeyondClientImpl: BeyondClient.BeyondClientBase
     {
@@ -57,6 +58,46 @@ namespace Beyond
         {
             return State.backend.Query(k, ctx);
         }
+        private async Task<bool> DoEvict(Key k, Key owner)
+        {
+            try
+            {
+                var block = await State.backend.Query(k, null);
+                if (block.Owners == null || !block.Owners.Owners.Contains(owner))
+                    return false;
+                block.Owners.Owners.Remove(owner);
+                block.Version = block.Version + 1;
+                var bak = new BlockAndKey();
+                bak.Key = k;
+                bak.Block = block;
+                await State.backend.TransactionalUpdate(bak, null);
+                return true;
+            }
+            catch (Exception e)
+            {
+                State.logger.LogError(e, "failed to evict a key");
+                return false;
+            }
+        }
+        public override async Task<Error> Evict(Key owner, ServerCallContext ctx)
+        {
+            var cnt = 0;
+            foreach (var k in (await State.backend.ListKeys(new Void(), ctx)).Keys)
+            {
+                if (await DoEvict(k, owner))
+                    cnt++;
+            }
+            foreach (var p in State.peers)
+            {
+                foreach (var kk in (await p.client.ListKeysAsync(new Void())).Keys)
+                {
+                    if (await DoEvict(kk, owner))
+                        cnt++;
+                }
+            }
+            State.logger.LogInformation("Evicted {count} blocks", cnt);
+            return Utils.ErrorFromCode(Error.Types.ErrorCode.Ok);
+        }
     }
     public class BeyondServiceImpl : BeyondNode.BeyondNodeBase
     {
@@ -67,6 +108,7 @@ namespace Beyond
         public BeyondServiceImpl(ILogger<BeyondServiceImpl> logger)
         {
             this.logger = logger;
+            State.logger = logger;
             if (State.storage == null)
             {
                 State.storage = new Storage(State.rootPath + "/data");
@@ -244,6 +286,12 @@ namespace Beyond
                 State.peers.Remove(peer);
                 return Utils.ErrorFromCode(Error.Types.ErrorCode.ExceptionThrown);
             }
+        }
+        public async Task<KeyList> ListKeys(Void v, ServerCallContext ctx)
+        {
+            var res = new KeyList();
+            res.Keys.AddRange(State.storage.List());
+            return res;
         }
         public async Task<Error> TransactionalUpdate(BlockAndKey bak, ServerCallContext ctx)
         {
