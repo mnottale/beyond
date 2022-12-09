@@ -251,8 +251,23 @@ namespace Beyond
             lk.Target = bak.Key;
             lk.Version = bak.Block.Version;
             lk.LockUid = Utils.RandomKey();
-            var peers = await LocatePeers(bak.Key);
-            if (peers.Count < State.replicationFactor / 2 + 1)
+            List<BPeer> peers = null;
+            var rf = State.replicationFactor;
+            if (bak.Block.Owners != null && bak.Block.Owners.Owners.Count() > 0)
+            {
+                rf = bak.Block.Owners.Owners.Count();
+                foreach (var pk in bak.Block.Owners.Owners)
+                {
+                    var hit = State.peers.Find(p=>p.info.Id.Equals(pk));
+                    if (hit != null)
+                        peers.Add(hit);
+                    else if (pk.Equals(State.self.Id))
+                        peers.Add(null);
+                }
+            }
+            else
+                peers = await LocatePeers(bak.Key);
+            if (peers.Count < rf / 2 + 1)
                 return Utils.ErrorFromCode(Error.Types.ErrorCode.NotEnoughPeers);
             var acquired = new List<BPeer>();
             var failed = new List<BPeer>();
@@ -277,7 +292,7 @@ namespace Beyond
                     failCode = res.Code;
             }
             if (failCode != Error.Types.ErrorCode.Ok
-                || acquired.Count < State.replicationFactor / 2 + 1)
+                || acquired.Count < rf / 2 + 1)
             {
                 foreach (var ack in acquired)
                    await Wrap(ack, ack.client.ReleaseLockAsync(lk).ResponseAsync);
