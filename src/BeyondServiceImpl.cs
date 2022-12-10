@@ -98,6 +98,68 @@ namespace Beyond
             State.logger.LogInformation("Evicted {count} blocks", cnt);
             return Utils.ErrorFromCode(Error.Types.ErrorCode.Ok);
         }
+        private async Task<bool> DoHeal(Key k)
+        {
+            try
+            {
+                var block = await State.backend.Query(k, null);
+                if (block.Owners == null || block.Owners.Owners.Count >= State.replicationFactor)
+                    return false;
+                List<BPeer> candidates = new List<BPeer>(State.peers);
+                candidates.Add(null); // me
+                candidates.Shuffle();
+                foreach (var co in block.Owners.Owners)
+                {
+                    if (co.Equals(State.self.Id))
+                        candidates.Remove(null);
+                    else
+                    {
+                        var hit = candidates.Find(x=>x.info.Id.Equals(co));
+                        if (hit != null)
+                            candidates.Remove(hit);
+                    }
+                }
+                if (!candidates.Any())
+                    return false;
+                var toAdd = State.replicationFactor - block.Owners.Owners.Count;
+                while (toAdd > 0 && candidates.Any())
+                {
+                    toAdd--;
+                    block.Owners.Owners.Add(candidates[0].info.Id);
+                    candidates.RemoveAt(0);
+                }
+                block.Version++;
+                var bak = new BlockAndKey();
+                bak.Key = k;
+                bak.Block = block;
+                await State.backend.TransactionalUpdate(bak, null);
+                return true;
+            }
+            catch (Exception e)
+            {
+                State.logger.LogError(e, "failed to heal a key");
+                return false;
+            }
+        }
+        public override async Task<Error> Heal(Void v, ServerCallContext ctx)
+        {
+            var cnt = 0;
+            foreach (var k in (await State.backend.ListKeys(new Void(), ctx)).Keys)
+            {
+                if (await DoHeal(k))
+                    cnt++;
+            }
+            foreach (var p in State.peers)
+            {
+                foreach (var kk in (await p.client.ListKeysAsync(new Void())).Keys)
+                {
+                    if (await DoHeal(kk))
+                        cnt++;
+                }
+            }
+            State.logger.LogInformation("healed {count} blocks", cnt);
+            return Utils.ErrorFromCode(Error.Types.ErrorCode.Ok);
+        }
     }
     public class BeyondServiceImpl : BeyondNode.BeyondNodeBase
     {

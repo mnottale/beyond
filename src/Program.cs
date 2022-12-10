@@ -26,6 +26,8 @@ namespace Beyond
         public string Serve { get; }
         [Option("--evict")]
         public string Evict { get; }
+        [Option("--heal")]
+        public bool Heal { get; }
         [Option("--create")]
         public bool Create { get; }
         [Option("--key")]
@@ -45,7 +47,9 @@ namespace Beyond
         protected async Task OnExecuteAsync(CancellationToken token)
         {
             //GrpcEnvironment.SetLogger(new Grpc.Core.Logging.ConsoleLogger());
-            if (!string.IsNullOrEmpty(Mount))
+            if (!string.IsNullOrEmpty(Mount)
+                ||!string.IsNullOrEmpty(Evict)
+                || Heal)
             {
                 string key = null;
                 string cert = null;
@@ -76,43 +80,19 @@ namespace Beyond
                             Credentials = ChannelCredentials.Insecure,
                         });
                 var bclient = new BeyondClient.BeyondClientClient(channel);
-                var fs = new FileSystem(bclient);
-                if (!string.IsNullOrEmpty(FsName))
-                    fs.SetFilesystem(FsName);
-                if (Create)
-                    fs.MkFS();
-                fs.Run(mountPoint, new string[] {});
-                return;
-            }
-            else if (!string.IsNullOrEmpty(Evict))
-            {
-                string key = null;
-                string cert = null;
-                string rootCA = null;
-                if (!string.IsNullOrEmpty(Key))
+                if (!string.IsNullOrEmpty(Mount))
                 {
-                    var kr = Key.Split(',');
-                    key = File.ReadAllText(kr[0]);
-                    var certName = kr[0].Substring(0, kr[0].Length-4)+".crt";
-                    cert = File.ReadAllText(certName);
-                    rootCA = File.ReadAllText(kr[1]);
+                    var fs = new FileSystem(bclient);
+                    if (!string.IsNullOrEmpty(FsName))
+                        fs.SetFilesystem(FsName);
+                    if (Create)
+                        fs.MkFS();
+                    fs.Run(mountPoint, new string[] {});
                 }
-                GrpcChannel channel = null;
-                if (key != null)
-                    channel = GrpcChannel.ForAddress(Peers, new GrpcChannelOptions
-                        {
-                            Credentials = new SslCredentials(
-                                rootCA,
-                                new KeyCertificatePair(cert, key)
-                                )
-                        });
-                else
-                    channel = GrpcChannel.ForAddress(Peers, new GrpcChannelOptions
-                        {
-                            Credentials = ChannelCredentials.Insecure,
-                        });
-                var bclient = new BeyondClient.BeyondClientClient(channel);
-                await bclient.EvictAsync(Utils.StringKey(Evict));
+                else if (!string.IsNullOrEmpty(Evict))
+                    await bclient.EvictAsync(Utils.StringKey(Evict));
+                else if (Heal)
+                    await bclient.HealAsync(new Void());
             }
             else if (!string.IsNullOrEmpty(Serve))
             {

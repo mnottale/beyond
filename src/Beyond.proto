@@ -7,6 +7,7 @@ service BeyondClient {
    rpc Query(Key) returns(Block) {}
 
    rpc Evict(Key) returns(Error) {}
+   rpc Heal(Void) returns(Error) {}
 }
 
 service BeyondNode {
