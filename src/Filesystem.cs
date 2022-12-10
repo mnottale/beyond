@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
@@ -608,12 +609,38 @@ namespace Beyond
 		protected override Errno OnGetPathExtendedAttribute (string path, string name, byte[] value, out int bytesWritten)
 		{
 		    bytesWritten = 0;
+		    logger.LogInformation("XATTR {name} {len}", name, value.Length);
+		    if (name.StartsWith("beyond."))
+		    {
+		        try {
+		            BlockAndKey file;
+		            var err = Get(path, out file);
+		            if (err != 0)
+		                return err;
+		            string result = null;
+		            if (name == "beyond.address")
+		                result = Utils.KeyString(file.Key);
+		            else if (name == "beyond.owners")
+		                result = String.Join('\n', file.Block.Owners.Owners.Select(x=>Utils.KeyString(x)));
+		            else if (name == "beyond.dump")
+		                result = file.ToString();
+		            var rb = System.Text.Encoding.UTF8.GetBytes(result);
+		            var l = Math.Min(value.Length, rb.Length);
+		            Array.Copy(rb, value, l);
+		            bytesWritten = l;
+		            return 0;
+		        }
+		        catch (Exception e)
+		        {
+		            logger.LogError(e, "bronk xattr");
+		        }
+		    }
 		    return Errno.EOPNOTSUPP;
 		}
 		protected override Errno OnListPathExtendedAttributes (string path, out string[] names)
 		{
-		    names = null;
-		    return Errno.EOPNOTSUPP;
+		    names = new string[] { "beyond.address", "beyond.owners", "beyond.dump"};
+		    return 0;
 		}
 		protected override Errno OnRemovePathExtendedAttribute (string path, string name)
 		{

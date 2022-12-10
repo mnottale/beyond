@@ -349,7 +349,7 @@ namespace Beyond
                 return Utils.ErrorFromCode(Error.Types.ErrorCode.ExceptionThrown);
             }
         }
-        public async Task<KeyList> ListKeys(Void v, ServerCallContext ctx)
+        public override async Task<KeyList> ListKeys(Void v, ServerCallContext ctx)
         {
             var res = new KeyList();
             res.Keys.AddRange(State.storage.List());
@@ -365,6 +365,7 @@ namespace Beyond
             var rf = State.replicationFactor;
             if (bak.Block.Owners != null && bak.Block.Owners.Owners.Count() > 0)
             {
+                peers = new List<BPeer>();
                 rf = bak.Block.Owners.Owners.Count();
                 foreach (var pk in bak.Block.Owners.Owners)
                 {
