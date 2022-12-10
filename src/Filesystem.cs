@@ -312,7 +312,49 @@ namespace Beyond
 		protected override Errno OnRenamePath (string from, string to)
 		{
 		    logger.LogInformation("MV {from} {to}", from, to);
-		    return Errno.EOPNOTSUPP;
+		    BlockAndKey todir = null;
+		    BlockAndKey fromdir = null;
+		    var compsfrom = from.Split('/');
+		    var fileNameFrom = compsfrom[compsfrom.Length-1];
+		    var compsto = to.Split('/');
+		    var fileNameTo = compsto[compsto.Length-1];
+		    var err = Get(from, out fromdir, parent:true);
+		    if (err != 0)
+		        return err;
+		    err = Get(to, out todir, parent:true);
+		    if (err != 0)
+		        return err;
+		    var exists = todir.Block.Directory.Entries.Where(e=>e.Name == fileNameTo).FirstOrDefault();
+		    if (exists != null)
+		    {
+		        if (exists.EntryType == DirectoryEntry.Types.EntryType.Directory)
+		            return Errno.EISDIR;
+		        err = OnRemoveFile(to);
+		        if (err != 0)
+		            return err;
+		    }
+		    var de = fromdir.Block.Directory.Entries.Where(e=>e.Name == fileNameFrom).FirstOrDefault();
+		    if (de == null)
+		        return Errno.ENOENT;
+		    var det = new DirectoryEntry();
+		    det.EntryType = de.EntryType;
+		    det.Name = fileNameTo;
+		    det.Address = de.Address;
+		    err = UpdateBlock(to, true, todir, b => {
+		            b.Block.Version = b.Block.Version + 1;
+		            b.Block.Directory.Entries.Add(det);
+		    });
+		    if (err != 0)
+		        return err;
+		    err = UpdateBlock(from, true, fromdir, b => {
+		            b.Block.Version = b.Block.Version + 1;
+		            var deb = b.Block.Directory.Entries.Where(e=>e.Name == fileNameFrom).FirstOrDefault();
+		            if (deb != null)
+		                b.Block.Directory.Entries.Remove(deb);
+		    });
+		    if (err != 0)
+		        return err;
+		    return 0;
 		}
 		protected override Errno OnCreateHardLink (string from, string to)
 		{
