@@ -42,6 +42,10 @@ namespace Beyond
         public int Replication { get; } = 1;
         [Option("--fs-name")]
         public string FsName { get; }
+        [Option("--uid")]
+        public uint Uid { get; }
+        [Option("--gid")]
+        public uint Gid { get; }
         static void Main(string[] args) => CommandLineApplication.Execute<Program>(args);
         
         protected async Task OnExecuteAsync(CancellationToken token)
@@ -82,7 +86,7 @@ namespace Beyond
                 var bclient = new BeyondClient.BeyondClientClient(channel);
                 if (!string.IsNullOrEmpty(Mount))
                 {
-                    var fs = new FileSystem(bclient);
+                    var fs = new FileSystem(bclient, Uid, Gid);
                     if (!string.IsNullOrEmpty(FsName))
                         fs.SetFilesystem(FsName);
                     if (Create)

@@ -32,10 +32,14 @@ namespace Beyond
         };
         ConcurrentDictionary<string, OpenedHandle> openedFiles = new ConcurrentDictionary<string, OpenedHandle>();
         byte[] rootAddress = new byte[32];
-        public FileSystem(BeyondClient.BeyondClientClient client)
+        private uint permUid = 0;
+        private uint permGid = 0;
+        public FileSystem(BeyondClient.BeyondClientClient client, uint uid=0, uint gid=0)
         {
             logger = Logger.loggerFactory.CreateLogger<BeyondServiceImpl>();
             this.client = client;
+            permUid = uid;
+            permGid = gid;
             GetRoot(); // ping
         }
         public void MkFS()
@@ -122,6 +126,8 @@ namespace Beyond
 		        buf.st_size = (block.Block.File != null) ? (long)block.Block.File.Size : 1024;
 		        buf.st_blksize = 65536;
 		        buf.st_blocks = buf.st_size / 512;
+		        buf.st_uid = permUid;
+		        buf.st_gid = permGid;
 		        logger.LogInformation("STAT {path} OK", path);
 		        return 0;
 		    }

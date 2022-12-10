@@ -32,7 +32,9 @@ class Beyond:
             cmd = ['/usr/lib/dotnet/dotnet6-6.0.110/dotnet','run','--no-build', '--',
                 '--mount', m,
                 '--replication', str(replication_factor),
-                '--peers', 'http://localhost:{}'.format(port)
+                '--peers', 'http://localhost:{}'.format(port),
+                '--uid', str(os.getuid()),
+                '--gid', str(os.getgid())
             ]
             if i == 0:
                 cmd = cmd + ['--create']
