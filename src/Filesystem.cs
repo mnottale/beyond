@@ -116,7 +116,8 @@ namespace Beyond
 		            logger.LogInformation("get failed, returning {errno}", err);
 		            return err;
 		        }
-		        buf.st_mode = ((block.Block.Directory != null) ? FilePermissions.S_IFDIR : FilePermissions.S_IFREG) | NativeConvert.FromOctalPermissionString("0777");
+		        buf.st_mode = ((block.Block.Directory != null) ? FilePermissions.S_IFDIR 
+		            : block.Block.SymLink != null ? FilePermissions.S_IFLNK : FilePermissions.S_IFREG) | NativeConvert.FromOctalPermissionString("0777");
 		        buf.st_nlink = 1;
 		        buf.st_size = (block.Block.File != null) ? (long)block.Block.File.Size : 1024;
 		        buf.st_blksize = 65536;
@@ -138,7 +139,12 @@ namespace Beyond
 		protected override Errno OnReadSymbolicLink (string path, out string target)
 		{
 		    target = null;
-		    return Errno.ENOENT;
+		    BlockAndKey file = null;
+		    var err = Get(path, out file);
+		    if (err != 0)
+		        return err;
+		    target = file.Block.SymLink.Target;
+		    return 0;
 		}
 		protected override Errno OnReadDirectory (string directory, OpenedPathInfo info, 
 				out IEnumerable<Mono.Fuse.NETStandard.DirectoryEntry> paths)
@@ -247,9 +253,12 @@ namespace Beyond
 		    err = Unlink(path, parent, fileName);
 		    if (err != 0)
 		        return err;
-		    foreach (var b in file.Block.File.Blocks)
+		    if (file.Block.File != null)
 		    {
-		        client.Delete(b.Address);
+		        foreach (var b in file.Block.File.Blocks)
+		        {
+		            client.Delete(b.Address);
+		        }
 		    }
 		    client.Delete(file.Key);
 		    return 0;
@@ -275,9 +284,30 @@ namespace Beyond
 		    client.Delete(file.Key);
 		    return 0;
 		}
-		protected override Errno OnCreateSymbolicLink (string from, string to)
+		protected override Errno OnCreateSymbolicLink (string target, string path)
 		{
-		    return Errno.EOPNOTSUPP;
+		    var comps = path.Split('/');
+		    var fileName = comps[comps.Length-1];
+		    BlockAndKey parent = null;
+		    var err = Get(path, out parent, parent: true);
+		    if (err != 0)
+		        return err;
+		    var file = new BlockAndKey();
+		    file.Key = Utils.RandomKey();
+		    file.Block = new Block();
+		    file.Block.Version = 1;
+		    file.Block.SymLink = new SymLink();
+		    file.Block.SymLink.Target = target;
+		    client.Insert(file);
+		    var dirent = new DirectoryEntry();
+		    dirent.EntryType = DirectoryEntry.Types.EntryType.Symlink;
+		    dirent.Name = fileName;
+		    dirent.Address = file.Key;
+		    err = UpdateBlock(path, true, parent, b => {
+		            b.Block.Version = b.Block.Version + 1;
+		            b.Block.Directory.Entries.Add(dirent);
+		    });
+		    return 0;
 		}
 		protected override Errno OnRenamePath (string from, string to)
 		{

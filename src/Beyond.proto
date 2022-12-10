@@ -99,12 +99,17 @@ message BlockOwnership {
   uint64 uptodateMask = 2;
 }
 
+message SymLink {
+  string target = 1;
+}
+
 message Block {
   int64 version = 1;
   bytes raw = 2;
   FileIndex file = 3;
   DirectoryIndex directory = 4;
   BlockOwnership owners = 5;
+  SymLink symLink = 6;
 }
 
 message FileIndex {
@@ -122,6 +127,7 @@ message DirectoryEntry {
   enum EntryType {
     FILE = 0;
     DIRECTORY = 1;
+    SYMLINK = 3;
   }
   EntryType entryType = 1;
   string name = 2;
