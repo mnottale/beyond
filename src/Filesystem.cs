@@ -51,6 +51,7 @@ namespace Beyond
             root.Block = new Block();
             root.Block.Version = 1;
             root.Block.Directory = new DirectoryIndex();
+            root.Block.Mode = "777";
             client.Insert(root);
         }
         public void SetFilesystem(string name)
@@ -121,7 +122,7 @@ namespace Beyond
 		            return err;
 		        }
 		        buf.st_mode = ((block.Block.Directory != null) ? FilePermissions.S_IFDIR 
-		            : block.Block.SymLink != null ? FilePermissions.S_IFLNK : FilePermissions.S_IFREG) | NativeConvert.FromOctalPermissionString("0777");
+		            : block.Block.SymLink != null ? FilePermissions.S_IFLNK : FilePermissions.S_IFREG) | NativeConvert.FromOctalPermissionString(block.Block.Mode);
 		        buf.st_nlink = 1;
 		        buf.st_size = (block.Block.File != null) ? (long)block.Block.File.Size : 1024;
 		        buf.st_blksize = 65536;
@@ -216,6 +217,7 @@ namespace Beyond
 		    bak.Block = new Block();
 		    bak.Block.Version = 1;
 		    bak.Block.Directory = new DirectoryIndex();
+		    bak.Block.Mode = NativeConvert.ToOctalPermissionString(mode);
 		    client.Insert(bak);
 		    var dirent = new DirectoryEntry();
 		    dirent.EntryType = DirectoryEntry.Types.EntryType.Directory;
@@ -369,7 +371,15 @@ namespace Beyond
 		}
 		protected override Errno OnChangePathPermissions (string path, FilePermissions mode)
 		{
-		    return 0;
+		    BlockAndKey block = null;
+		    var err = Get(path, out block);
+		    if (err != 0)
+		        return err;
+		    err = UpdateBlock(path, true, block, b => {
+		            b.Block.Version = b.Block.Version + 1;
+		            b.Block.Mode = NativeConvert.ToOctalPermissionString(mode);
+		    });
+		    return err;
 		}
 		protected override Errno OnChangePathOwner (string path, long uid, long gid)
 		{
@@ -386,13 +396,13 @@ namespace Beyond
 		}
 		protected override Errno OnCreateHandle (string file, OpenedPathInfo info, FilePermissions mode)
 		{
-			return OpenOrCreate(file, true);
+			return OpenOrCreate(file, true, mode);
 		}
 		protected override Errno OnOpenHandle (string path, OpenedPathInfo info)
 		{
 		    return OpenOrCreate(path, false);
 		}
-		private Errno OpenOrCreate(string path, bool allowCreation)
+		private Errno OpenOrCreate(string path, bool allowCreation, FilePermissions? mode=null)
 		{
 		    logger.LogInformation("OPEN {path}", path);
 		    try
@@ -423,6 +433,7 @@ namespace Beyond
 		            file.Key = Utils.RandomKey();
 		            file.Block = new Block();
 		            file.Block.Version = 1;
+		            file.Block.Mode = NativeConvert.ToOctalPermissionString(mode.Value);
 		            client.Insert(file);
 		            var comps = path.Split('/');
 		            var fileName = comps[comps.Length-1];

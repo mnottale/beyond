@@ -110,6 +110,7 @@ message Block {
   DirectoryIndex directory = 4;
   BlockOwnership owners = 5;
   SymLink symLink = 6;
+  string mode = 7;
 }
 
 message FileIndex {
