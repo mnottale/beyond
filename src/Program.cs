@@ -30,6 +30,8 @@ namespace Beyond
         public bool Heal { get; }
         [Option("--create")]
         public bool Create { get; }
+        [Option("--yes")]
+        public bool Yes { get; }
         [Option("--key")]
         public string Key { get; }
         [Option("--peers")]
@@ -90,7 +92,19 @@ namespace Beyond
                     if (!string.IsNullOrEmpty(FsName))
                         fs.SetFilesystem(FsName);
                     if (Create)
+                    {
+                        if (!Yes)
+                        {
+                            Console.WriteLine("Please confirm new filesystem creation by typing yes. Anything else will exit.");
+                            var confirm = Console.ReadLine();
+                            if (confirm != "yes")
+                            {
+                                Console.WriteLine("Aborting...");
+                                return;
+                            }
+                        }
                         fs.MkFS();
+                    }
                     fs.Run(mountPoint, new string[] {});
                 }
                 else if (!string.IsNullOrEmpty(Evict))

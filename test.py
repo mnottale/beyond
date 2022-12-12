@@ -37,7 +37,7 @@ class Beyond:
                 '--gid', str(os.getgid())
             ]
             if i == 0:
-                cmd = cmd + ['--create']
+                cmd = cmd + ['--create', '--yes']
             out=open(os.path.join(self.root, 'mount'+str(i)+'.log'), 'w')
             handle = subprocess.Popen(cmd, cwd=os.path.join(me, 'src'), stdout=out, stderr=out)
             self.mounts.append((handle, out))
