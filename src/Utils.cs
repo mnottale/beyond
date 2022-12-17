@@ -1,4 +1,5 @@
 using System;
+using System.Security.Cryptography;
 using System.Collections.Generic;
 
 namespace Beyond
@@ -70,6 +71,23 @@ namespace Beyond
             for (var i = 0; i < bytes.Length; i++)
             {
                 bytes[i] = Convert.ToByte(s.Substring(i * 2, 2), 16);
+            }
+            var res = new Key();
+            res.Key_ = Google.Protobuf.ByteString.CopyFrom(bytes);
+            return res;
+        }
+        public static Key Checksum(byte[] dataa, byte[] datab = null)
+        {
+            using var sha = SHA256.Create();
+            byte[] bytes = null;
+            if (datab == null)
+                bytes = SHA256.HashData(dataa);
+            else
+            {//FIXME this sucks
+                var d = new byte[dataa.Length + datab.Length];
+                Array.Copy(dataa, d, dataa.Length);
+                Array.Copy(datab, 0, d, dataa.Length, datab.Length);
+                bytes = SHA256.HashData(d);
             }
             var res = new Key();
             res.Key_ = Google.Protobuf.ByteString.CopyFrom(bytes);

@@ -106,11 +106,27 @@ message SymLink {
 message Block {
   int64 version = 1;
   bytes raw = 2;
+  BlockOwnership owners = 5;
+  
+  // maybe encrypted stuff, FIXME submessage
   FileIndex file = 3;
   DirectoryIndex directory = 4;
-  BlockOwnership owners = 5;
   SymLink symLink = 6;
   string mode = 7;
+
+  // crypto on
+  
+  bytes salt = 8;
+  bytes encryptedData = 9; // encrypted raw data for immutable
+  bytes encryptedBlock = 16;
+  
+  // mutable block
+  Key owner = 10;
+  KeyHashList writers = 11;
+  Signature writersSignature = 12;
+  EncryptionKeyList readers = 13;
+  Signature readersSignature = 14;
+  Signature encryptedDataSignature = 15;
 }
 
 message FileIndex {
@@ -133,4 +149,27 @@ message DirectoryEntry {
   EntryType entryType = 1;
   string name = 2;
   Key address = 3;
+}
+
+message Signature {
+  Key keyHash = 1;
+  bytes signature = 2;
+}
+
+message KeyHashList {
+  repeated Key keyHashes = 1;
+}
+
+message AESKey {
+  bytes key = 1;
+  bytes iv = 2;
+}
+
+message EncryptionKey {
+  Key recipient = 1;
+  bytes encryptedKeyIv = 2;
+}
+
+message EncryptionKeyList {
+  repeated EncryptionKey encryptionKeys = 1;
 }
