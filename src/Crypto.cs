@@ -96,8 +96,25 @@ public class Crypto
             }
         }
     }
+    public async Task SealImmutable(BlockAndKey bak, AESKey aes)
+    {
+        bak.Block.EncryptedData = Google.Protobuf.ByteString.CopyFrom(
+                Encrypt(bak.Block.Raw.ToByteArray(), aes));
+        var addr = Utils.Checksum(bak.Block.Salt.ToByteArray(), bak.Block.EncryptedData.ToByteArray());
+        bak.Key = new Key();
+        bak.Key.Key_ = addr.Key_;
+        bak.Block.Raw = null;
+    }
     public async Task SealMutable(BlockAndKey bak, BlockChange bc, AESKey aes)
     {
+        if (bak.Key == null)
+        {
+            if (bak.Block.Salt == null || bak.Block.Salt.Length == 0)
+                bak.Block.Salt = Utils.RandomKey().Key_;
+            if (bak.Block.Owner == null)
+                bak.Block.Owner = _ownerSig;
+            bak.Key = Utils.Checksum(bak.Block.Owner.ToByteArray(), bak.Block.Salt.ToByteArray());
+        }
         if ((bc & BlockChange.Data) != 0)
         {
             var bclear = new Block();
@@ -112,13 +129,12 @@ public class Crypto
             var sig = (_owner as RSA).SignData(ser, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
             bak.Block.EncryptedDataSignature.KeyHash = _ownerSig;
             bak.Block.EncryptedDataSignature.Signature_ = Google.Protobuf.ByteString.CopyFrom(sig);
-
         }
         if ((bc & BlockChange.Writers) != 0)
         {
             foreach (var w in bak.Block.Writers.KeyHashes)
             {
-                // first ensure w is in readers
+                // ensure w is in readers
                 var r = bak.Block.Readers.EncryptionKeys.Where(x=>x.Recipient.Equals(w)).FirstOrDefault();
                 if (r == null)
                 {
@@ -141,7 +157,7 @@ public class Crypto
         if ((bc & BlockChange.Readers) != 0)
         {
             foreach (var r in bak.Block.Readers.EncryptionKeys)
-            {
+            { // ensure everyone has a key
                 if (r.EncryptedKeyIv == null || r.EncryptedKeyIv.Length == 0)
                 {
                     var wk = await GetKey(r.Recipient);
@@ -154,7 +170,6 @@ public class Crypto
             var sig = (_owner as RSA).SignData(ws, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
             bak.Block.ReadersSignature.KeyHash = _ownerSig;
             bak.Block.ReadersSignature.Signature_ = Google.Protobuf.ByteString.CopyFrom(sig);
-
         }
         // clear plaintext fields
         bak.Block.Raw = null;
@@ -191,10 +206,47 @@ public class Crypto
     }
     public async Task<bool> VerifyRead(BlockAndKey bak)
     {
+        if (bak.Block.Owner == null)
+        { // immutable
+            var iaddr = Utils.Checksum(bak.Block.Salt.ToByteArray(), bak.Block.EncryptedData.ToByteArray());
+            if (!iaddr.Equals(bak.Key))
+                return false;
+            return true;
+        }
+        // mutable
+        var addr = Utils.Checksum(bak.Block.Owner.ToByteArray(), bak.Block.Salt.ToByteArray());
+        if (!addr.Equals(bak.Key))
+            return false;
+        var bok = await GetKey(bak.Block.Owner);
+        var ok = (bok as RSA).VerifyData(
+            bak.Block.EncryptedBlock.ToByteArray(),
+            bak.Block.EncryptedDataSignature.ToByteArray(),
+            HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        if (!ok)
+            return false;
+        // Is there a point in verifying readers and writers signature when reading?
         return true;
     }
     public async Task<bool> VerifyWrite(BlockAndKey bak)
     {
+        if (!await VerifyRead(bak))
+            return false;
+        if (bak.Block.Owner == null)
+            return true;
+        // for now only owner can change readers/writers, although block format permits others to do so
+        var bok = await GetKey(bak.Block.Owner);
+        var ok = (bok as RSA).VerifyData(
+            bak.Block.Writers.ToByteArray(),
+            bak.Block.WritersSignature.Signature_.ToByteArray(),
+            HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        if (!ok)
+            return false;
+        ok = (bok as RSA).VerifyData(
+            bak.Block.Readers.ToByteArray(),
+            bak.Block.ReadersSignature.Signature_.ToByteArray(),
+            HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        if (!ok)
+            return false;
         return true;
     }
 }
