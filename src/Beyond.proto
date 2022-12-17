@@ -127,6 +127,9 @@ message Block {
   EncryptionKeyList readers = 13;
   Signature readersSignature = 14;
   Signature encryptedDataSignature = 15;
+  
+  // ptr blocks
+  Key pointer = 17;
 }
 
 message FileIndex {

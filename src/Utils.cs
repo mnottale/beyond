@@ -76,6 +76,12 @@ namespace Beyond
             res.Key_ = Google.Protobuf.ByteString.CopyFrom(bytes);
             return res;
         }
+        public static byte[] HalfKey(byte[] data)
+        {
+            var res = new byte[data.Length / 2];
+            Array.Copy(data, res, res.Length);
+            return res;
+        }
         public static Key Checksum(byte[] dataa, byte[] datab = null)
         {
             using var sha = SHA256.Create();

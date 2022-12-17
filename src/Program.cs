@@ -20,6 +20,10 @@ namespace Beyond
 {
     class Program
     {
+        [Option("--createKey")]
+        public string CreateKey { get; }
+        [Option("--mountKey")]
+        public string MountKey { get; }
         [Option("--mount")]
         public string Mount { get; }
         [Option("--serve")]
@@ -50,8 +54,59 @@ namespace Beyond
         public uint Gid { get; }
         static void Main(string[] args) => CommandLineApplication.Execute<Program>(args);
         
+        public string GetPassword()
+        {
+            var password = "";
+            var ch = Console.ReadKey(true);
+            while (ch.Key != ConsoleKey.Enter)
+            {
+                password += ch.KeyChar;
+                Console.Write('*');
+                ch = Console.ReadKey(true);
+            }
+            Console.WriteLine();
+            return password;
+        }
         protected async Task OnExecuteAsync(CancellationToken token)
         {
+            var logger = Logger.loggerFactory.CreateLogger<Program>();
+            if (!string.IsNullOrEmpty(CreateKey))
+            {
+                Console.WriteLine("Please enter a passhrase for your key:");
+                var passphrase = GetPassword();
+                Console.WriteLine("Please retype the passhrase for confirmation:");
+                var confirm = GetPassword();
+                if (passphrase != confirm)
+                {
+                    Console.WriteLine("Mismatch, exiting...(looser)");
+                    return;
+                }
+                var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                var beyond = home + "/.beyond";
+                Directory.CreateDirectory(beyond);
+                var target = beyond + "/"+CreateKey+".key";
+                if (File.Exists(target))
+                {
+                    Console.WriteLine("File exists, refusing to overwrite");
+                    return;
+                }
+                var k = Crypto.MakeAsymmetricKey(passphrase);
+                File.WriteAllBytes(target, k);
+                Console.WriteLine("Key saved at " + target);
+                return;
+            }
+            Crypto crypto = null;
+            if (!string.IsNullOrEmpty(MountKey))
+            {
+                crypto = new Crypto();
+                var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                var beyond = home + "/.beyond";
+                var target = beyond + "/"+MountKey+".key";
+                var data = File.ReadAllBytes(target);
+                Console.WriteLine("Enter passphrase for " + target);
+                var passphrase = GetPassword();
+                crypto.SetOwner(data, passphrase);
+            }
             //GrpcEnvironment.SetLogger(new Grpc.Core.Logging.ConsoleLogger());
             if (!string.IsNullOrEmpty(Mount)
                 ||!string.IsNullOrEmpty(Evict)
@@ -88,9 +143,21 @@ namespace Beyond
                 var bclient = new BeyondClient.BeyondClientClient(channel);
                 if (!string.IsNullOrEmpty(Mount))
                 {
-                    var fs = new FileSystem(bclient, Uid, Gid);
+                    var fs = new FileSystem(bclient, Uid, Gid, crypto);
                     if (!string.IsNullOrEmpty(FsName))
                         fs.SetFilesystem(FsName);
+                    if (!string.IsNullOrEmpty(MountKey))
+                    { // always try to insert key
+                        var toput = crypto.ExportOwnerPublicKey();
+                        try
+                        {
+                            var bak = await bclient.QueryAsync(toput.Key);
+                        }
+                        catch (Exception e)
+                        {
+                            await bclient.InsertAsync(toput);
+                        }
+                    }
                     if (Create)
                     {
                         if (!Yes)
@@ -160,7 +227,7 @@ namespace Beyond
                             }
                             catch(Exception e)
                             {
-                                Logger.loggerFactory.CreateLogger<Program>().LogError(e, "bronk connecting"); 
+                               logger.LogError(e, "bronk connecting"); 
                             }
                         });
                 }

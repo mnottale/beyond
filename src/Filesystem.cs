@@ -28,31 +28,55 @@ namespace Beyond
             public bool dirty;
             public ulong openCount;
             public BlockAndKey fileBlock;
+            public AESKey key;
             public ConcurrentDictionary<ulong, FileChunk> chunks = new ConcurrentDictionary<ulong, FileChunk>();
         };
         ConcurrentDictionary<string, OpenedHandle> openedFiles = new ConcurrentDictionary<string, OpenedHandle>();
         byte[] rootAddress = new byte[32];
         private uint permUid = 0;
         private uint permGid = 0;
-        public FileSystem(BeyondClient.BeyondClientClient client, uint uid=0, uint gid=0)
+        private Crypto crypto = null;
+        public FileSystem(BeyondClient.BeyondClientClient client, uint uid=0, uint gid=0, Crypto c = null)
         {
             logger = Logger.loggerFactory.CreateLogger<BeyondServiceImpl>();
             this.client = client;
             permUid = uid;
             permGid = gid;
-            GetRoot(); // ping
+            this.crypto = c;
+            //GetRoot(); // ping
+            if (crypto != null)
+                crypto.GetKeyBlock = async k => await client.QueryAsync(k);
         }
         public void MkFS()
         {
             logger.LogInformation("MAKING NEW FILESYSTEM");
             // FIXME: add a safety check
-            var root = new BlockAndKey();
-            root.Key = RootAddress();
-            root.Block = new Block();
-            root.Block.Version = 1;
-            root.Block.Directory = new DirectoryIndex();
-            root.Block.Mode = "777";
-            client.Insert(root);
+            if (crypto != null)
+            { // use a pointer block
+                var root = new BlockAndKey();
+                root.Key = RootAddress();
+                root.Block = new Block();
+                root.Block.Version = 1;
+                root.Block.Directory = new DirectoryIndex();
+                root.Block.Mode = "777";
+                crypto.SealMutable(root, BlockChange.Data | BlockChange.Readers, null).Wait();
+                client.Insert(root);
+                var ptr = new BlockAndKey();
+                ptr.Key = RootAddress();
+                ptr.Block = new Block();
+                ptr.Block.Pointer = root.Key;
+                client.Insert(ptr);
+            }
+            else
+            {
+                var root = new BlockAndKey();
+                root.Key = RootAddress();
+                root.Block = new Block();
+                root.Block.Version = 1;
+                root.Block.Directory = new DirectoryIndex();
+                root.Block.Mode = "777";
+                client.Insert(root);
+            }
         }
         public void SetFilesystem(string name)
         {
@@ -70,7 +94,13 @@ namespace Beyond
             BlockAndKey res = new BlockAndKey();
             res.Key = RootAddress();
             res.Block = client.Query(res.Key);
-            return res;
+            if (crypto == null)
+                return res;
+            var rp = new BlockAndKey();
+            rp.Key = res.Block.Pointer;
+            rp.Block = client.Query(rp.Key);
+            crypto.UnsealMutable(rp, out _);
+            return rp;
         }
         protected Errno Get(string path, out BlockAndKey block, bool parent=false)
         {
@@ -95,6 +125,8 @@ namespace Beyond
                         var blk = client.Query(ent.Address);
                         current.Key = ent.Address;
                         current.Block = blk;
+                        if (crypto != null)
+                            crypto.UnsealMutable(current, out _);
                         hit = true;
                         break;
                     }
@@ -180,6 +212,11 @@ namespace Beyond
 		    retry(block);
 		    while (true)
 		    {
+		        if (crypto != null)
+		        {
+		            crypto.ExtractKey(block, out var aes); 
+		            crypto.SealMutable(block, BlockChange.Data, aes).Wait();
+		        }
 		        var res = client.TransactionalUpdate(block);
 		        if (res.Code == Error.Types.ErrorCode.Ok)
 		            break;
@@ -415,6 +452,7 @@ namespace Beyond
 		        }
 		        BlockAndKey file;
 		        var err = Get(path, out file);
+		        AESKey key = null;
 		        if (err == Errno.ENOENT)
 		        {
 		            if (!allowCreation)
@@ -434,7 +472,17 @@ namespace Beyond
 		            file.Block = new Block();
 		            file.Block.Version = 1;
 		            file.Block.Mode = NativeConvert.ToOctalPermissionString(mode.Value);
-		            client.Insert(file);
+		            if (crypto != null)
+		            {
+		                key = new AESKey();
+		                key.Key = Utils.RandomKey().Key_;
+		                key.Iv = Utils.RandomKey().Key_;
+		                var fseal = file.Clone();
+		                crypto.SealMutable(fseal, BlockChange.Data, key).Wait();
+		                client.Insert(fseal);
+		            }
+		            else
+		                client.Insert(file);
 		            var comps = path.Split('/');
 		            var fileName = comps[comps.Length-1];
 		            var dirent = new DirectoryEntry();
@@ -446,17 +494,20 @@ namespace Beyond
 		                    b.Block.Directory.Entries.Add(dirent);
 		            });
 		        }
-		        if (err != 0)
+		        else if (err != 0)
 		        {
 		            logger.LogInformation("failed to write block: {err}", err);
 		            return err;
 		        }
+		        else
+		            crypto?.ExtractKey(file, out key);
 		        if (file.Block.File == null)
 		            file.Block.File = new FileIndex();
 		        openedFiles.TryAdd(path, new OpenedHandle
 		            {
 		                openCount = 1,
 		                fileBlock = file,
+		                key = key,
 		            });
 		        logger.LogInformation("File block: {file}", file);
 		        logger.LogInformation("Open success");
@@ -612,7 +663,13 @@ namespace Beyond
 		{
 		    while (true)
 		    {
-		        var res = client.TransactionalUpdate(oh.fileBlock);
+		        var fbc = oh.fileBlock;
+		        if (crypto != null)
+		        {
+		            fbc = fbc.Clone();
+		            crypto.SealMutable(fbc, BlockChange.Data, oh.key).Wait();
+		        }
+		        var res = client.TransactionalUpdate(fbc);
 		        if (res.Code == Error.Types.ErrorCode.Ok)
 		            break;
 		        if (res.Code != Error.Types.ErrorCode.AlreadyLocked
