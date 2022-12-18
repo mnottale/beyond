@@ -90,10 +90,8 @@ namespace Beyond
                 bytes = SHA256.HashData(dataa);
             else
             {//FIXME this sucks
-                var d = new byte[dataa.Length + datab.Length];
-                Array.Copy(dataa, d, dataa.Length);
-                Array.Copy(datab, 0, d, dataa.Length, datab.Length);
-                bytes = SHA256.HashData(d);
+                sha.TransformBlock(dataa, 0, dataa.Length, null, 0);
+                bytes = sha.TransformFinalBlock(datab, 0, datab.Length);
             }
             var res = new Key();
             res.Key_ = Google.Protobuf.ByteString.CopyFrom(bytes);

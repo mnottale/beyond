@@ -187,7 +187,10 @@ public class Crypto
             bak.Block.WritersSignature.Signature_ = Google.Protobuf.ByteString.CopyFrom(sig);
         }
         if (bak.Block.Readers == null)
+        {
             bak.Block.Readers = new EncryptionKeyList();
+            bc |= BlockChange.Readers;
+        }
         if ((bc & BlockChange.Readers) != 0)
         {
             var ekowner = bak.Block.Readers.EncryptionKeys.Where(k=>k.Recipient.Equals(_ownerSig)).FirstOrDefault();
@@ -217,6 +220,7 @@ public class Crypto
         bak.Block.Directory = null;
         bak.Block.SymLink = null;
         bak.Block.Mode = "";
+        _logger.LogInformation("Sealed block: {block}", bak.ToString());
     }
     public Errno UnsealImmutable(BlockAndKey bak, AESKey aes)
     {
@@ -228,10 +232,16 @@ public class Crypto
     {
         aes = null;
         if (bak.Block.Readers == null)
-            return 0;
+        {
+            _logger.LogWarning("Empty reader block");
+            return Errno.EIO;
+        }
         var me = bak.Block.Readers.EncryptionKeys.Where(x=>x.Recipient.Equals(_ownerSig)).FirstOrDefault();
         if (me == null)
+        {
+             _logger.LogWarning("fs owner not found in readers");
             return Errno.EPERM;
+        }
         var aesSer = (_owner as RSA).Decrypt(me.EncryptedKeyIv.ToByteArray(), RSAEncryptionPadding.Pkcs1);
         using var ms = new MemoryStream(aesSer);
         aes = AESKey.Parser.ParseFrom(ms);
@@ -239,6 +249,7 @@ public class Crypto
     }
     public Errno UnsealMutable(BlockAndKey bak, out AESKey aes)
     {
+        _logger.LogInformation("unsealing block: {block}", bak.ToString());
         var err = ExtractKey(bak, out aes);
         if (err != 0)
         {

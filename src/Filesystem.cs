@@ -54,7 +54,6 @@ namespace Beyond
             if (crypto != null)
             { // use a pointer block
                 var root = new BlockAndKey();
-                root.Key = RootAddress();
                 root.Block = new Block();
                 root.Block.Version = 1;
                 root.Block.Directory = new DirectoryIndex();
