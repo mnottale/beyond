@@ -149,13 +149,16 @@ namespace Beyond
                     if (!string.IsNullOrEmpty(MountKey))
                     { // always try to insert key
                         var toput = crypto.ExportOwnerPublicKey();
+                        Console.WriteLine("You are using key "  + Utils.KeyString(toput.Key));
                         try
                         {
-                            var bak = await bclient.QueryAsync(toput.Key);
+                            var blk = await bclient.QueryAsync(toput.Key);
+                            if (blk.Raw == null || blk.Raw.Length == 0)
+                                await bclient.InsertAsync(toput);
                         }
                         catch (Exception e)
                         {
-                            await bclient.InsertAsync(toput);
+                            logger.LogInformation(e, "Not pushing key");
                         }
                     }
                     if (Create)

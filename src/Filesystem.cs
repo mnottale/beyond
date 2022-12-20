@@ -525,7 +525,16 @@ namespace Beyond
 		    {
 		        if (chunkIndex >= (ulong)oh.fileBlock.Block.File.Blocks.Count)
 		            return 0;
-		        var block = client.Query(oh.fileBlock.Block.File.Blocks[(int)chunkIndex].Address);
+		        var baddr = oh.fileBlock.Block.File.Blocks[(int)chunkIndex].Address;
+		        var block = client.Query(baddr);
+		        if (crypto != null)
+		        {
+		            var bak = new BlockAndKey();
+		            bak.Key = baddr;
+		            bak.Block = block;
+		            crypto.UnsealImmutable(bak, oh.key);
+		        }
+		        
 		        chunk = new FileChunk {
 		            atime = DateTime.Now,
 		            dirty = false,
@@ -580,10 +589,13 @@ namespace Beyond
 		            for (int ci = oh.fileBlock.Block.File.Blocks.Count; ci <= (int)chunkIndex; ++ci)
 		            {
 		                BlockAndKey bak = new BlockAndKey();
-		                bak.Key = Utils.RandomKey();
-		                bak.Block = new Block();
-		                bak.Block.Version = 1;
-		                client.Insert(bak);
+		                if (crypto == null)
+		                {
+		                    bak.Key = Utils.RandomKey();
+		                    bak.Block = new Block();
+		                    bak.Block.Version = 1;
+		                    client.Insert(bak);
+		                }
 		                var fb = new FileBlock();
 		                fb.Address = bak.Key;
 		                oh.fileBlock.Block.File.Blocks.Add(fb);
@@ -599,7 +611,15 @@ namespace Beyond
 		        }
 		        else
 		        {
-		            var bl = client.Query(oh.fileBlock.Block.File.Blocks[(int)chunkIndex].Address);
+		            var baddr = oh.fileBlock.Block.File.Blocks[(int)chunkIndex].Address;
+		            var bl = client.Query(baddr);
+		            if (crypto != null)
+		            {
+		                 var bak = new BlockAndKey();
+		                 bak.Key = baddr;
+		                 bak.Block = bl;
+		                 crypto.UnsealImmutable(bak, oh.key);
+		            }
 		            chunk = new FileChunk
 		            {
 		                atime = DateTime.Now,
@@ -690,6 +710,21 @@ namespace Beyond
 		    bak.Block = new Block();
 		    bak.Block.Version = (long)(chunk.version+1);
 		    bak.Block.Raw = Google.Protobuf.ByteString.CopyFrom(chunk.data);
+		    if (crypto != null)
+		    {
+		        var prevAddr = bak.Key;
+		        crypto.SealImmutable(bak, oh.key).Wait();
+		        if (prevAddr != null && prevAddr.Equals(bak.Key))
+		            return 0; // actually can't happen, we resalt
+		        logger.LogInformation("Immutable replace {old} to {new}", prevAddr, bak.Key);
+		        client.Insert(bak);
+		        if (prevAddr != null)
+		            client.Delete(prevAddr);
+		         oh.fileBlock.Block.File.Blocks[chunkIndex].Address = bak.Key;
+		         oh.dirty = true;
+		         chunk.dirty = false;
+		         return 0;
+		    }
 		    while (true)
 		    {
 		        var res = client.TransactionalUpdate(bak);
@@ -749,6 +784,40 @@ namespace Beyond
 		}
 		protected override Errno OnSetPathExtendedAttribute (string path, string name, byte[] value, XattrFlags flags)
 		{
+		    if (name.StartsWith("beyond."))
+		    {
+		        try
+		        {
+		            var err = Get(path, out var file);
+		            if (err != 0)
+		            {
+		                logger.LogWarning("setxattr failed to get {path} with {errno}", path, err);
+		                return err;
+		            }
+		            if (name == "beyond.addreader")
+		            {
+		                var keyAddr = Utils.StringKey(System.Text.Encoding.UTF8.GetString(value));
+		                var pkb = client.Query(keyAddr);
+		                file.Block.Readers.EncryptionKeys.Add(new EncryptionKey { Recipient = keyAddr});
+		                file.Block.Version += 1;
+		                err = crypto.ExtractKey(file, out var key);
+		                if (err != 0)
+		                    return err;
+		                crypto.SealMutable(file, BlockChange.Readers, key).Wait();
+		                var res = client.TransactionalUpdate(file);
+		                if (res.Code != Error.Types.ErrorCode.Ok)
+		                {
+		                    logger.LogWarning("addreader failed with code {code}", res.Code);
+		                    return Errno.EIO;
+		                }
+		                return 0;
+		            }
+		        }
+		        catch(Exception e)
+		        {
+		            logger.LogWarning(e, "Exception in setxattr");
+		        }
+		    }
 		    return Errno.EOPNOTSUPP;
 		}
 		protected override Errno OnGetPathExtendedAttribute (string path, string name, byte[] value, out int bytesWritten)

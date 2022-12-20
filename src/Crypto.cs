@@ -53,6 +53,7 @@ public class Crypto
         bak.Key = _ownerSig;
         bak.Block = new Block();
         bak.Block.Raw = Google.Protobuf.ByteString.CopyFrom(pub);
+        _logger.LogInformation("Key export {addr} {block}", Utils.KeyString(bak.Key), bak.Block);
         return bak;
     }
     public async Task<AsymmetricAlgorithm> GetKey(Key sig)
@@ -62,6 +63,7 @@ public class Crypto
         if (_ownerSig.Equals(sig))
             return _owner;
         var blk = await GetKeyBlock(sig);
+        _logger.LogInformation("Key import {addr} {block}", Utils.KeyString(sig), blk);
         var data = blk.Raw.ToByteArray();
         var aa = new RSACryptoServiceProvider(512);
         int br = 0;
@@ -122,12 +124,16 @@ public class Crypto
     }
     public async Task SealImmutable(BlockAndKey bak, AESKey aes)
     {
+        if (bak.Block.Salt == null || bak.Block.Salt.Length == 0)
+        {
+            bak.Block.Salt = Utils.RandomKey().Key_;
+        }
         bak.Block.EncryptedData = Google.Protobuf.ByteString.CopyFrom(
                 Encrypt(bak.Block.Raw.ToByteArray(), aes));
         var addr = Utils.Checksum(bak.Block.Salt.ToByteArray(), bak.Block.EncryptedData.ToByteArray());
         bak.Key = new Key();
         bak.Key.Key_ = addr.Key_;
-        bak.Block.Raw = null;
+        bak.Block.Raw = Google.Protobuf.ByteString.Empty;
     }
     public async Task SealMutable(BlockAndKey bak, BlockChange bc, AESKey aes)
     {
