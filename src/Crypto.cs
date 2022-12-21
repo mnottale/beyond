@@ -60,7 +60,7 @@ public class Crypto
     {
         if (_keys.TryGetValue(sig, out var res))
             return res;
-        if (_ownerSig.Equals(sig))
+        if (_ownerSig != null && _ownerSig.Equals(sig))
             return _owner;
         var blk = await GetKeyBlock(sig);
         _logger.LogInformation("Key import {addr} {block}", Utils.KeyString(sig), blk);
@@ -159,10 +159,10 @@ public class Crypto
             bclear.SymLink = bak.Block.SymLink;
             bclear.Mode = bak.Block.Mode;
             var ser = bclear.ToByteArray();
-            bak.Block.EncryptedBlock = Google.Protobuf.ByteString.CopyFrom(
-                Encrypt(ser, aes));
+            var enc = Encrypt(ser, aes);
+            bak.Block.EncryptedBlock = Google.Protobuf.ByteString.CopyFrom(enc);
             //sign
-            var sig = (_owner as RSA).SignData(ser, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+            var sig = (_owner as RSA).SignData(enc, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
             bak.Block.EncryptedDataSignature = new Signature();
             bak.Block.EncryptedDataSignature.KeyHash = _ownerSig;
             bak.Block.EncryptedDataSignature.Signature_ = Google.Protobuf.ByteString.CopyFrom(sig);
@@ -271,49 +271,62 @@ public class Crypto
         bak.Block.Mode = dblock.Mode;
         return 0;
     }
-    public async Task<bool> VerifyRead(BlockAndKey bak)
+    public async Task<int> VerifyRead(BlockAndKey bak)
     {
         if (bak.Block.Owner == null)
         { // immutable
             var iaddr = Utils.Checksum(bak.Block.Salt.ToByteArray(), bak.Block.EncryptedData.ToByteArray());
             if (!iaddr.Equals(bak.Key))
-                return false;
-            return true;
+                return 1;
+            return 0;
         }
         // mutable
         var addr = Utils.Checksum(bak.Block.Owner.ToByteArray(), bak.Block.Salt.ToByteArray());
         if (!addr.Equals(bak.Key))
-            return false;
+            return 2;
         var bok = await GetKey(bak.Block.Owner);
-        var ok = (bok as RSA).VerifyData(
-            bak.Block.EncryptedBlock.ToByteArray(),
-            bak.Block.EncryptedDataSignature.ToByteArray(),
-            HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-        if (!ok)
-            return false;
-        // Is there a point in verifying readers and writers signature when reading?
-        return true;
-    }
-    public async Task<bool> VerifyWrite(BlockAndKey bak)
-    {
-        if (!await VerifyRead(bak))
-            return false;
-        if (bak.Block.Owner == null)
-            return true;
-        // for now only owner can change readers/writers, although block format permits others to do so
-        var bok = await GetKey(bak.Block.Owner);
-        var ok = (bok as RSA).VerifyData(
-            bak.Block.Writers.ToByteArray(),
-            bak.Block.WritersSignature.Signature_.ToByteArray(),
-            HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-        if (!ok)
-            return false;
+        var ok = true;
+        if (bak.Block.Writers != null)
+        {
+            ok = (bok as RSA).VerifyData(
+                bak.Block.Writers.ToByteArray(),
+                bak.Block.WritersSignature.Signature_.ToByteArray(),
+                HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+            if (!ok)
+                return 5;
+        }
         ok = (bok as RSA).VerifyData(
             bak.Block.Readers.ToByteArray(),
             bak.Block.ReadersSignature.Signature_.ToByteArray(),
             HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         if (!ok)
-            return false;
-        return true;
+            return 6;
+        if (!bak.Block.EncryptedDataSignature.KeyHash.Equals(bak.Block.Owner))
+        {
+             if (bak.Block.Writers == null)
+                 return 7;
+            var hit = bak.Block.Writers.KeyHashes.Where(x=>x.Equals(bak.Block.EncryptedDataSignature.KeyHash)).FirstOrDefault();
+            if (hit == null)
+                return 8; // not a writer
+            bok = await GetKey(bak.Block.EncryptedDataSignature.KeyHash);
+        }
+        ok = (bok as RSA).VerifyData(
+            bak.Block.EncryptedBlock.ToByteArray(),
+            bak.Block.EncryptedDataSignature.Signature_.ToByteArray(),
+            HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        if (!ok)
+            return 9;
+        return 0;
+    }
+    public async Task<int> VerifyWrite(BlockAndKey bak, BlockAndKey previous)
+    {
+        if (bak.Block.Owner == null)
+            return 0;
+        if (previous != null && !bak.Block.Owner.Equals(previous.Block.Owner))
+            return 4;
+        var vr = await VerifyRead(bak);
+        if (vr != 0)
+            return vr;
+        return 0;
     }
 }

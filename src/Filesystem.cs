@@ -227,7 +227,7 @@ namespace Beyond
 		          return Errno.EIO;
 		        }
 		        // try again
-		        logger.LogInformation("UpdateBlock is retrying");
+		        logger.LogInformation("UpdateBlock is retrying {code}", res.Code);
 		        var err = Get(path, out block, parent:parentPath);
 		        if (err != 0)
 		        {
@@ -249,11 +249,14 @@ namespace Beyond
 		    var last = components[components.Length-1];
 		    // first create and push the new directory block
 		    var bak = new BlockAndKey();
-		    bak.Key = Utils.RandomKey();
+		    if (crypto == null)
+		        bak.Key = Utils.RandomKey();
 		    bak.Block = new Block();
 		    bak.Block.Version = 1;
 		    bak.Block.Directory = new DirectoryIndex();
 		    bak.Block.Mode = NativeConvert.ToOctalPermissionString(mode);
+		    if (crypto != null)
+		        crypto.SealMutable(bak, BlockChange.Data, null).Wait();
 		    client.Insert(bak);
 		    var dirent = new DirectoryEntry();
 		    dirent.EntryType = DirectoryEntry.Types.EntryType.Directory;

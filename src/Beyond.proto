@@ -54,6 +54,7 @@ message Error {
     NOT_ENOUGH_PEERS = 4;
     CONFLICT = 5;
     EXCEPTION_THROWN = 6;
+    VERIFICATION_FAILED = 7;
   }
   ErrorCode code = 1;
   int64 currentVersion = 2;

@@ -17,6 +17,7 @@ class Beyond:
             cmd = ['/usr/lib/dotnet/dotnet6-6.0.110/dotnet','run','--no-build', '--',
                 '--serve', os.path.join(self.root, str(i)),
                 '--port', str(port+i),
+                '--crypt',
                 '--replication', str(replication_factor)
             ]
             if i != 0:

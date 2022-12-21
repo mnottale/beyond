@@ -36,6 +36,8 @@ namespace Beyond
         public bool Create { get; }
         [Option("--yes")]
         public bool Yes { get; }
+        [Option("--crypt")]
+        public bool Crypt { get; }
         [Option("--key")]
         public string Key { get; }
         [Option("--peers")]
@@ -96,16 +98,19 @@ namespace Beyond
                 return;
             }
             Crypto crypto = null;
-            if (!string.IsNullOrEmpty(MountKey))
+            if (!string.IsNullOrEmpty(MountKey) || Crypt)
             {
                 crypto = new Crypto();
-                var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-                var beyond = home + "/.beyond";
-                var target = beyond + "/"+MountKey+".key";
-                var data = File.ReadAllBytes(target);
-                Console.WriteLine("Enter passphrase for " + target);
-                var passphrase = GetPassword();
-                crypto.SetOwner(data, passphrase);
+                if (!string.IsNullOrEmpty(MountKey))
+                {
+                    var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                    var beyond = home + "/.beyond";
+                    var target = beyond + "/"+MountKey+".key";
+                    var data = File.ReadAllBytes(target);
+                    Console.WriteLine("Enter passphrase for " + target);
+                    var passphrase = GetPassword();
+                    crypto.SetOwner(data, passphrase);
+                }
             }
             //GrpcEnvironment.SetLogger(new Grpc.Core.Logging.ConsoleLogger());
             if (!string.IsNullOrEmpty(Mount)
@@ -206,6 +211,7 @@ namespace Beyond
                 State.replicationFactor = Replication;
                 State.rootPath = Serve;
                 State.port = Port;
+                State.crypto = crypto;
                 State.backend = new BeyondServiceImpl(Logger.loggerFactory.CreateLogger<BeyondServiceImpl>());
                 //var client = new BeyondClientImpl();
                 var builder = WebApplication.CreateBuilder();

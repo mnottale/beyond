@@ -28,6 +28,7 @@ namespace Beyond
         public static string rootPath;
         public static int port;
 
+        public static Crypto crypto;
         public static Storage storage;
         public static List<BPeer> peers = new List<BPeer>();
         public static Peer self;
@@ -171,6 +172,12 @@ namespace Beyond
         {
             this.logger = logger;
             State.logger = logger;
+            if (State.backend == null)
+            {
+                State.backend = this;
+            }
+            if (State.crypto != null && State.crypto.GetKeyBlock == null)
+                State.crypto.GetKeyBlock = async k => await State.backend.Query(k, null);
             if (State.storage == null)
             {
                 State.storage = new Storage(State.rootPath + "/data");
@@ -286,19 +293,48 @@ namespace Beyond
                 State.locks.TryRemove(lk.Target, out _);
             return Task.FromResult(Utils.ErrorFromCode(Error.Types.ErrorCode.Ok));
         }
+        private async Task<bool> VerifyWrite(BlockAndKey bak)
+        {
+            if (State.crypto == null)
+                return true;
+            BlockAndKey previous = null;
+            if (State.storage.Has(bak.Key))
+            {
+                previous = new BlockAndKey();
+                previous.Block = await GetBlock(bak.Key, null);
+                previous.Key = bak.Key;
+            }
+            var failCode = await State.crypto.VerifyWrite(bak, previous);
+            if (failCode != 0)
+                logger.LogWarning("Block {key} verification failed, code {erc}", Utils.KeyString(bak.Key), failCode);
+            return failCode == 0;
+        }
         public override async Task<Error> Write(BlockAndKey bak, ServerCallContext ctx)
         {
+            var ok = await VerifyWrite(bak);
+            if (!ok)
+                return Utils.ErrorFromCode(Error.Types.ErrorCode.VerificationFailed);
             var serialized = bak.Block.ToByteArray();
             State.storage.Put(bak.Key, serialized);
             return Utils.ErrorFromCode(Error.Types.ErrorCode.Ok);
         }
         public override async Task<Error> WriteAndRelease(BlockAndLock bal, ServerCallContext ctx)
         {
+            var ok = await VerifyWrite(bal.BlockAndKey);
+            if (!ok)
+            {
+                if (State.locks.TryGetValue(bal.Lock.Target, out var lkId))
+                {
+                    if (lkId.Equals(bal.Lock.LockUid))
+                        State.locks.TryRemove(bal.Lock.Target, out _);
+                }
+                return Utils.ErrorFromCode(Error.Types.ErrorCode.VerificationFailed);
+            }
             var serialized = bal.BlockAndKey.Block.ToByteArray();
             State.storage.Put(bal.BlockAndKey.Key, serialized);
-            if (State.locks.TryGetValue(bal.Lock.Target, out var lkId))
+            if (State.locks.TryGetValue(bal.Lock.Target, out var lkIdb))
             {
-                if (lkId.Equals(bal.Lock.LockUid))
+                if (lkIdb.Equals(bal.Lock.LockUid))
                     State.locks.TryRemove(bal.Lock.Target, out _);
             }
             return Utils.ErrorFromCode(Error.Types.ErrorCode.Ok);
