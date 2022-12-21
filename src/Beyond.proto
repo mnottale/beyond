@@ -104,6 +104,13 @@ message SymLink {
   string target = 1;
 }
 
+message KeyAliasList {
+  repeated KeyAlias keyAliases = 1;
+}
+message KeyAlias {
+  string alias = 1;
+  Key keyHash = 2;
+}
 message Block {
   int64 version = 1;
   bytes raw = 2;
@@ -114,6 +121,7 @@ message Block {
   DirectoryIndex directory = 4;
   SymLink symLink = 6;
   string mode = 7;
+  KeyAliasList aliases = 18;
 
   // crypto on
   

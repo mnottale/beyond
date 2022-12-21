@@ -785,6 +785,16 @@ namespace Beyond
 		{
 		    return 0;
 		}
+		private Key GetAlias(string als)
+		{
+		    var err = Get("/", out var file);
+		    if (err != 0)
+		        return null;
+		    var hit = file.Block.Aliases.KeyAliases.Where(x=>x.Alias == als).FirstOrDefault();
+		    if (hit == null)
+		        return null;
+		    return hit.KeyHash;
+		}
 		protected override Errno OnSetPathExtendedAttribute (string path, string name, byte[] value, XattrFlags flags)
 		{
 		    if (name.StartsWith("beyond."))
@@ -799,7 +809,10 @@ namespace Beyond
 		            }
 		            if (name == "beyond.addreader")
 		            {
-		                var keyAddr = Utils.StringKey(System.Text.Encoding.UTF8.GetString(value));
+		                var keySpec = System.Text.Encoding.UTF8.GetString(value);
+		                var keyAddr = keySpec.Length == 64 ? Utils.StringKey(keySpec) : GetAlias(keySpec);
+		                if (keyAddr == null)
+		                    return Errno.EIO;
 		                var pkb = client.Query(keyAddr);
 		                file.Block.Readers.EncryptionKeys.Add(new EncryptionKey { Recipient = keyAddr});
 		                file.Block.Version += 1;
@@ -817,7 +830,10 @@ namespace Beyond
 		            }
 		            if (name == "beyond.addwriter")
 		            {
-		                var keyAddr = Utils.StringKey(System.Text.Encoding.UTF8.GetString(value));
+		                var keySpec = System.Text.Encoding.UTF8.GetString(value);
+		                var keyAddr = keySpec.Length == 64 ? Utils.StringKey(keySpec) : GetAlias(keySpec);
+		                if (keyAddr == null)
+		                    return Errno.EIO;
 		                var pkb = client.Query(keyAddr);
 		                if (file.Block.Writers == null)
 		                    file.Block.Writers = new KeyHashList();
@@ -827,6 +843,32 @@ namespace Beyond
 		                if (err != 0)
 		                    return err;
 		                crypto.SealMutable(file, BlockChange.Writers, key).Wait();
+		                var res = client.TransactionalUpdate(file);
+		                if (res.Code != Error.Types.ErrorCode.Ok)
+		                {
+		                    logger.LogWarning("addreader failed with code {code}", res.Code);
+		                    return Errno.EIO;
+		                }
+		                return 0;
+		            }
+		            if (name == "beyond.addalias")
+		            {
+		                var ak = System.Text.Encoding.UTF8.GetString(value).Split(':');
+		                var als = ak[0];
+		                var keyAddr = Utils.StringKey(ak[1]);
+		                var pkb = client.Query(keyAddr);
+		                if (file.Block.Aliases == null)
+		                    file.Block.Aliases = new KeyAliasList();
+		                file.Block.Aliases.KeyAliases.Add(new KeyAlias
+		                   {
+		                       Alias = als,
+		                       KeyHash = keyAddr,
+		                   });
+		                file.Block.Version += 1;
+		                err = crypto.ExtractKey(file, out var key);
+		                if (err != 0)
+		                    return err;
+		                crypto.SealMutable(file, BlockChange.Data, key).Wait();
 		                var res = client.TransactionalUpdate(file);
 		                if (res.Code != Error.Types.ErrorCode.Ok)
 		                {

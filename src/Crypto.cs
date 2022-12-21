@@ -158,6 +158,7 @@ public class Crypto
             bclear.Directory = bak.Block.Directory;
             bclear.SymLink = bak.Block.SymLink;
             bclear.Mode = bak.Block.Mode;
+            bclear.Aliases = bak.Block.Aliases;
             var ser = bclear.ToByteArray();
             var enc = Encrypt(ser, aes);
             bak.Block.EncryptedBlock = Google.Protobuf.ByteString.CopyFrom(enc);
@@ -226,6 +227,7 @@ public class Crypto
         bak.Block.Directory = null;
         bak.Block.SymLink = null;
         bak.Block.Mode = "";
+        bak.Block.Aliases = null;
         _logger.LogInformation("Sealed block: {block}", bak.ToString());
     }
     public Errno UnsealImmutable(BlockAndKey bak, AESKey aes)
@@ -269,6 +271,7 @@ public class Crypto
         bak.Block.Directory = dblock.Directory;
         bak.Block.SymLink = dblock.SymLink;
         bak.Block.Mode = dblock.Mode;
+        bak.Block.Aliases = dblock.Aliases;
         return 0;
     }
     public async Task<int> VerifyRead(BlockAndKey bak)
