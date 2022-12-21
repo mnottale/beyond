@@ -125,7 +125,11 @@ namespace Beyond
                         current.Key = ent.Address;
                         current.Block = blk;
                         if (crypto != null)
-                            crypto.UnsealMutable(current, out _);
+                        {
+                            var err = crypto.UnsealMutable(current, out _);
+                            if (err != 0)
+                                return err;
+                        }
                         hit = true;
                         break;
                     }
@@ -145,21 +149,54 @@ namespace Beyond
 		    try
 		    {
 		        logger.LogInformation("STAT {path}", path);
-		        BlockAndKey block;
-		        var err = Get(path, out block);
+		        var components = path.Split('/');
+		        var filename = components[components.Length-1];
+		        var err = Get(path, out var parent, parent:true);
 		        if (err != 0)
 		        {
 		            logger.LogInformation("get failed, returning {errno}", err);
 		            return err;
 		        }
-		        buf.st_mode = ((block.Block.Directory != null) ? FilePermissions.S_IFDIR 
-		            : block.Block.SymLink != null ? FilePermissions.S_IFLNK : FilePermissions.S_IFREG) | NativeConvert.FromOctalPermissionString(block.Block.Mode);
-		        buf.st_nlink = 1;
-		        buf.st_size = (block.Block.File != null) ? (long)block.Block.File.Size : 1024;
+		        var block = new BlockAndKey();
+		        if (path == "/")
+		        {
+		            buf.st_mode = FilePermissions.S_IFDIR;
+		            block = parent;
+		        }
+		        else
+		        {
+		            var hit = parent.Block.Directory?.Entries?.Where(x=>x.Name == filename).FirstOrDefault();
+		            if (hit == null)
+		                return Errno.ENOENT;
+		            buf.st_mode = hit.EntryType switch
+		            {
+		                DirectoryEntry.Types.EntryType.File =>  FilePermissions.S_IFREG,
+		                DirectoryEntry.Types.EntryType.Directory =>  FilePermissions.S_IFDIR,
+		                DirectoryEntry.Types.EntryType.Symlink =>  FilePermissions.S_IFLNK,
+		            };
+		            var rawblock = client.Query(hit.Address);
+		            block.Key = hit.Address;
+		            block.Block = rawblock;
+		            if (crypto != null)
+		            {
+		                err = crypto.UnsealMutable(block, out _);
+		                if (err != 0)
+		                {
+		                    logger.LogInformation("STAT {path} PARTIAL", path);
+		                    return 0;
+		                }
+		            }
+		        }
+
 		        buf.st_blksize = 65536;
-		        buf.st_blocks = buf.st_size / 512;
 		        buf.st_uid = permUid;
 		        buf.st_gid = permGid;
+		        buf.st_nlink = 1;
+
+		        buf.st_mode |= NativeConvert.FromOctalPermissionString(block.Block.Mode);
+		        buf.st_size = (block.Block.File != null) ? (long)block.Block.File.Size : 1024;
+		        buf.st_blocks = buf.st_size / 512;
+
 		        logger.LogInformation("STAT {path} OK", path);
 		        return 0;
 		    }
