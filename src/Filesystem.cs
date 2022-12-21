@@ -815,6 +815,26 @@ namespace Beyond
 		                }
 		                return 0;
 		            }
+		            if (name == "beyond.addwriter")
+		            {
+		                var keyAddr = Utils.StringKey(System.Text.Encoding.UTF8.GetString(value));
+		                var pkb = client.Query(keyAddr);
+		                if (file.Block.Writers == null)
+		                    file.Block.Writers = new KeyHashList();
+		                file.Block.Version += 1;
+		                file.Block.Writers.KeyHashes.Add(keyAddr);
+		                err = crypto.ExtractKey(file, out var key);
+		                if (err != 0)
+		                    return err;
+		                crypto.SealMutable(file, BlockChange.Writers, key).Wait();
+		                var res = client.TransactionalUpdate(file);
+		                if (res.Code != Error.Types.ErrorCode.Ok)
+		                {
+		                    logger.LogWarning("addreader failed with code {code}", res.Code);
+		                    return Errno.EIO;
+		                }
+		                return 0;
+		            }
 		        }
 		        catch(Exception e)
 		        {
