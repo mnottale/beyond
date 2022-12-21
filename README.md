@@ -2,7 +2,8 @@
 
 ## What is it?
 
-Beyond is a work-in-progress distributed filesystem.
+Beyond is a work-in-progress cryptographically secure distributed filesystem.
+
 Data is split into blocks which are spread across storage nodes, with
 a configureable replication factor.
 
@@ -25,6 +26,12 @@ On first launch add `--create`. Never pass it again or it will destroy everythin
 
 It is mandatory to pass the same `--replication` to all commands.
 
+## How to activate crypto layer?
+
+Each user should create a key pair with `beyond --createKey <keyname>`.
+
+Storage nodes should run with `--crypt`, and mounts with `--mountKey <keyname>`.
+
 ## How is it implemented?
 
 C# GRPC, Fuse (C# binding). There is one service for node-to-node communication, and each node
@@ -39,16 +46,50 @@ a majority of nodes can be reached and use a simple consensus algorithm.
 
 No.
 
-## Known bugs/limitations
+## Can you describe the crypto model?
 
-- GRPC connection errors are not handled, if a node disconnects you'll need to
-  restart all other nodes.
+File data is stored in AES-encrypted salted immutable blocks. Their address
+is the hash of salt+encrypted_data, preventing any file tampering.
+
+File manifest (list of data blocks) and directory content are stored in
+mutable blocks, whose address is the hash of salt+owner_key_fingerprint.
+
+Mutable blocks are AES-encrypted and signed. One copy of the AES key is stored
+RSA-encrypted per registered reader.
+Reader and writer lists are signed by the owner.
+
+All blocks are validated by nodes at read and write time. All signatures and
+hashes are checked, and at update time nodes verify that owner doesn't change.
+
+User keys are referenced by their fingerprint (hash of public key), the actual
+keys are stored as immutable blocks.
+
+## How to manage multiple users with crypto enabled?
+
+You can add keys to each file or directory's authorized readers and writers.
+
+This is achieved using extended attributes.
+
+The root block owner (creator of the filesystem) can register aliases to avoid
+using key hashes all the time.
+
+Ask for a user's key hash (displayed when mounting) and do
+
+    xattr -w beyond.addalias alice:AABBCCDD... mountpoint/
+
+where alice is your alias and AABBCCDD... is the 64 characters hex encoded key hash.
+
+Then the owner of a file or directory can add readers and writers
+using `beyond.addwriter` and `beyond.addreader` xattr names.
+The payload is a key hash or a registered alias.
+
+Note that a writer of a directory can set it's content to anything, potentially
+unlinking files she does not have access to.
 
 ## Future features and goals
 
   - Caching layer for faster usage
-  - Handle node disconnection
-  - Crypto layer
+  - Plug crypto layer weaknesse by signing block deletion requests.
   - Safer read that checks quorum
-  - Healing under-replicated blocks
-  - Node eviction
+  - Healing outdated blocks
+  - ...
