@@ -341,6 +341,11 @@ namespace Beyond
 		    err = Get(path, out parent, parent: true);
 		    if (err != 0)
 		        return err;
+		    if (crypto != null)
+		    {
+		        if (!crypto.CanWrite(parent) || !crypto.CanWrite(file))
+		            return Errno.EPERM;
+		    }
 		    err = Unlink(path, parent, fileName);
 		    if (err != 0)
 		        return err;
@@ -375,6 +380,11 @@ namespace Beyond
 		    err = Get(path, out parent, parent: true);
 		    if (err != 0)
 		        return err;
+		    if (crypto != null)
+		    {
+		        if (!crypto.CanWrite(parent) || !crypto.CanWrite(file))
+		            return Errno.EPERM;
+		    }
 		    err = Unlink(path, parent, fileName);
 		    if (err != 0)
 		        return err;
