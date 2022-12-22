@@ -115,7 +115,10 @@ message Block {
   int64 version = 1;
   bytes raw = 2;
   BlockOwnership owners = 5;
-  
+
+  bool inheritReaders = 20;
+  bool inheritWriters = 21;
+
   // maybe encrypted stuff, FIXME submessage
   FileIndex file = 3;
   DirectoryIndex directory = 4;

@@ -299,8 +299,13 @@ namespace Beyond
 		    bak.Block.Version = 1;
 		    bak.Block.Directory = new DirectoryIndex();
 		    bak.Block.Mode = NativeConvert.ToOctalPermissionString(mode);
+		    bak.Block.InheritReaders = parent.Block.InheritReaders;
+		    bak.Block.InheritWriters = parent.Block.InheritWriters;
 		    if (crypto != null)
-		        crypto.SealMutable(bak, BlockChange.Data, null).Wait();
+		    {
+		        crypto.Inherit(bak, parent, bak.Block.InheritReaders, bak.Block.InheritWriters);
+		        crypto.SealMutable(bak, BlockChange.All, null).Wait();
+		    }
 		    client.Insert(bak);
 		    var dirent = new DirectoryEntry();
 		    dirent.EntryType = DirectoryEntry.Types.EntryType.Directory;
@@ -539,12 +544,15 @@ namespace Beyond
 		            file.Block.Mode = NativeConvert.ToOctalPermissionString(mode.Value);
 		            if (crypto != null)
 		            {
+		                file.Block.InheritReaders = parent.Block.InheritReaders;
+		                file.Block.InheritWriters = parent.Block.InheritWriters;
+		                crypto.Inherit(file, parent, file.Block.InheritReaders, file.Block.InheritWriters);
 		                key = new AESKey();
 		                key.Key = Utils.RandomKey().Key_;
 		                key.Iv = Utils.RandomKey().Key_;
 		                var fseal = file.Clone();
 		                fseal.Key = null;
-		                crypto.SealMutable(fseal, BlockChange.Data, key).Wait();
+		                crypto.SealMutable(fseal, BlockChange.All, key).Wait();
 		                client.Insert(fseal);
 		                file.Key = fseal.Key;
 		                file.Block.Owner = fseal.Block.Owner;
@@ -931,6 +939,24 @@ namespace Beyond
 		                       Alias = als,
 		                       KeyHash = keyAddr,
 		                   });
+		                file.Block.Version += 1;
+		                err = crypto.ExtractKey(file, out var key);
+		                if (err != 0)
+		                    return err;
+		                crypto.SealMutable(file, BlockChange.Data, key).Wait();
+		                var res = client.TransactionalUpdate(file);
+		                if (res.Code != Error.Types.ErrorCode.Ok)
+		                {
+		                    logger.LogWarning("addreader failed with code {code}", res.Code);
+		                    return Errno.EIO;
+		                }
+		                return 0;
+		            }
+		            if (name == "beyond.inherit")
+		            {
+		                var mode = System.Text.Encoding.UTF8.GetString(value).ToLower();
+		                file.Block.InheritReaders = mode.Contains("r");
+		                file.Block.InheritWriters = mode.Contains("w");
 		                file.Block.Version += 1;
 		                err = crypto.ExtractKey(file, out var key);
 		                if (err != 0)

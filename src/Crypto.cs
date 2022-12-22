@@ -16,6 +16,7 @@ public enum BlockChange
     Data = 1,
     Writers = 2,
     Readers = 4,
+    All = 7,
 }
 public class Crypto
 {
@@ -170,7 +171,7 @@ public class Crypto
             bak.Block.EncryptedDataSignature.KeyHash = _ownerSig;
             bak.Block.EncryptedDataSignature.Signature_ = Google.Protobuf.ByteString.CopyFrom(sig);
         }
-        if ((bc & BlockChange.Writers) != 0)
+        if ((bc & BlockChange.Writers) != 0 && bak.Block.Writers != null)
         {
             foreach (var w in bak.Block.Writers.KeyHashes)
             {
@@ -290,6 +291,8 @@ public class Crypto
         if (!addr.Equals(bak.Key))
             return 2;
         var bok = await GetKey(bak.Block.Owner);
+        if (bok == null)
+            return 10;
         var ok = true;
         if (bak.Block.Writers != null)
         {
@@ -314,6 +317,8 @@ public class Crypto
             if (hit == null)
                 return 8; // not a writer
             bok = await GetKey(bak.Block.EncryptedDataSignature.KeyHash);
+            if (bok == null)
+                return 11;
         }
         ok = (bok as RSA).VerifyData(
             bak.Block.EncryptedBlock.ToByteArray(),
@@ -370,5 +375,29 @@ public class Crypto
             return false;
         var hit = bak.Block.Writers.KeyHashes.Where(x=>x.Equals(_ownerSig)).FirstOrDefault();
         return hit != null;
+    }
+    public void Inherit(BlockAndKey target, BlockAndKey parent, bool ir, bool iw)
+    {
+        if (ir)
+        {
+            if (target.Block.Readers == null)
+                target.Block.Readers = new EncryptionKeyList();
+            foreach (var r in parent.Block.Readers.EncryptionKeys)
+            {
+                target.Block.Readers.EncryptionKeys.Add(new EncryptionKey { Recipient = r.Recipient}); 
+            }
+        }
+        if (iw)
+        {
+            if (parent.Block.Writers != null)
+            {
+                if (target.Block.Writers == null)
+                    target.Block.Writers = new KeyHashList();
+                foreach (var w in parent.Block.Writers.KeyHashes)
+                {
+                    target.Block.Writers.KeyHashes.Add(w);
+                }
+            }
+        }
     }
 }

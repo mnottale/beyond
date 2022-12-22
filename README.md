@@ -83,6 +83,13 @@ Then the owner of a file or directory can add readers and writers
 using `beyond.addwriter` and `beyond.addreader` xattr names.
 The payload is a key hash or a registered alias.
 
+To ease things a bit, you can mark a directory for read or write key inheritance:
+
+    xattr -w beyond.inherit r mountpoint/some/dir
+
+If set to r/w (or rw), all created files and directory will copy the list of readers/writers
+from the parent directory. Inheritance flags are also inherited.
+
 Note that a writer of a directory can set it's content to anything, potentially
 unlinking files she does not have access to.
 
