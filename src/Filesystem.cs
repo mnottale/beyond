@@ -158,6 +158,7 @@ namespace Beyond
 		            return err;
 		        }
 		        var block = new BlockAndKey();
+		        var writeable = true;
 		        if (path == "/")
 		        {
 		            buf.st_mode = FilePermissions.S_IFDIR;
@@ -185,6 +186,8 @@ namespace Beyond
 		                    logger.LogInformation("STAT {path} PARTIAL", path);
 		                    return 0;
 		                }
+		                if (!crypto.CanWrite(block))
+		                    writeable = false;
 		            }
 		        }
 
@@ -194,6 +197,10 @@ namespace Beyond
 		        buf.st_nlink = 1;
 
 		        buf.st_mode |= NativeConvert.FromOctalPermissionString(block.Block.Mode);
+		        if (!writeable)
+		            buf.st_mode &= ~(FilePermissions.S_IWUSR | FilePermissions.S_IWGRP | FilePermissions.S_IWOTH);
+		        logger.LogInformation("MODE PRE {mode}", buf.st_mode);
+		        logger.LogInformation("MODE POST {mode}", buf.st_mode);
 		        buf.st_size = (block.Block.File != null) ? (long)block.Block.File.Size : 1024;
 		        buf.st_blocks = buf.st_size / 512;
 
@@ -341,10 +348,16 @@ namespace Beyond
 		    {
 		        foreach (var b in file.Block.File.Blocks)
 		        {
-		            client.Delete(b.Address);
+		            if (crypto != null)
+		                client.Delete(crypto.DeletionRequest(b.Address, file.Key));
+		            else
+		                client.Delete(new BlockAndKey{Key = b.Address});
 		        }
 		    }
-		    client.Delete(file.Key);
+		    if (crypto != null)
+		        client.Delete(crypto.DeletionRequest(file.Key, file.Key));
+		    else
+		        client.Delete(new BlockAndKey {Key = file.Key});
 		    return 0;
 		}
 		protected override Errno OnRemoveDirectory (string path)
@@ -365,7 +378,10 @@ namespace Beyond
 		    err = Unlink(path, parent, fileName);
 		    if (err != 0)
 		        return err;
-		    client.Delete(file.Key);
+		    if (crypto != null)
+		        client.Delete(crypto.DeletionRequest(file.Key, file.Key));
+		    else
+		        client.Delete(new BlockAndKey {Key = file.Key});
 		    return 0;
 		}
 		protected override Errno OnCreateSymbolicLink (string target, string path)
@@ -517,8 +533,11 @@ namespace Beyond
 		                key.Key = Utils.RandomKey().Key_;
 		                key.Iv = Utils.RandomKey().Key_;
 		                var fseal = file.Clone();
+		                fseal.Key = null;
 		                crypto.SealMutable(fseal, BlockChange.Data, key).Wait();
 		                client.Insert(fseal);
+		                file.Key = fseal.Key;
+		                file.Block.Owner = fseal.Block.Owner;
 		            }
 		            else
 		                client.Insert(file);
@@ -750,6 +769,7 @@ namespace Beyond
 		    bak.Block = new Block();
 		    bak.Block.Version = (long)(chunk.version+1);
 		    bak.Block.Raw = Google.Protobuf.ByteString.CopyFrom(chunk.data);
+		    bak.Block.OwningBlock = oh.fileBlock.Key;
 		    if (crypto != null)
 		    {
 		        var prevAddr = bak.Key;
@@ -759,7 +779,7 @@ namespace Beyond
 		        logger.LogInformation("Immutable replace {old} to {new}", prevAddr, bak.Key);
 		        client.Insert(bak);
 		        if (prevAddr != null)
-		            client.Delete(prevAddr);
+		            client.Delete(crypto.DeletionRequest(prevAddr, oh.fileBlock.Key));
 		         oh.fileBlock.Block.File.Blocks[chunkIndex].Address = bak.Key;
 		         oh.dirty = true;
 		         chunk.dirty = false;

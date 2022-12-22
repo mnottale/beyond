@@ -151,6 +151,8 @@ public class Crypto
                 bak.Block.Owner = _ownerSig;
             bak.Key = Utils.Checksum(bak.Block.Owner.ToByteArray(), bak.Block.Salt.ToByteArray());
         }
+        else if (bak.Block.Owner == null)
+            throw new System.Exception("Owner not set, but key set");
         if ((bc & BlockChange.Data) != 0)
         {
             var bclear = new Block();
@@ -331,5 +333,42 @@ public class Crypto
         if (vr != 0)
             return vr;
         return 0;
+    }
+    public async Task<int> VerifyDelete(BlockAndKey request, Block target, Block owner)
+    {
+        Key allowed = target.OwningBlock != null ? owner.Owner : target.Owner;
+        if (allowed == null)
+            return 2;
+        var bok = await GetKey(allowed);
+        if (! (bok as RSA).VerifyData(
+            request.Key.ToByteArray(),
+            request.Block.EncryptedDataSignature.Signature_.ToByteArray(),
+            HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))
+            return 1;
+        return 0;
+    }
+    public BlockAndKey DeletionRequest(Key target, Key owner)
+    {
+        var res = new BlockAndKey();
+        res.Key = target;
+        res.Block = new Block();
+        res.Block.EncryptedDataSignature = new Signature();
+        res.Block.EncryptedDataSignature.KeyHash = _ownerSig;
+        res.Block.EncryptedDataSignature.Signature_ =
+          Google.Protobuf.ByteString.CopyFrom(
+              (_owner as RSA).SignData(target.ToByteArray(), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1)
+              );
+        return res;
+    }
+    public bool CanWrite(BlockAndKey bak)
+    {
+        if (bak.Block.Owner == null)
+            return false;
+        if (bak.Block.Owner.Equals(_ownerSig))
+            return true;
+        if (bak.Block.Writers == null)
+            return false;
+        var hit = bak.Block.Writers.KeyHashes.Where(x=>x.Equals(_ownerSig)).FirstOrDefault();
+        return hit != null;
     }
 }

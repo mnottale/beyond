@@ -3,7 +3,7 @@ syntax = "proto3";
 service BeyondClient {
    rpc TransactionalUpdate(BlockAndKey) returns (Error) {}
    rpc Insert(BlockAndKey) returns(Error) {}
-   rpc Delete(Key) returns(Error) {}
+   rpc Delete(BlockAndKey) returns(Error) {}
    rpc Query(Key) returns(Block) {}
 
    rpc Evict(Key) returns(Error) {}
@@ -27,7 +27,7 @@ service BeyondNode {
    rpc Write(BlockAndKey) returns (Error) {}
    rpc WriteAndRelease(BlockAndLock) returns (Error) {}
    rpc HasBlock(Key) returns (Error) {}
-   rpc DeleteBlock(Key) returns (Error) {}
+   rpc DeleteBlock(BlockAndKey) returns (Error) {}
    rpc GetBlock(Key) returns (Block) {}
 
    // misc
@@ -129,6 +129,9 @@ message Block {
   bytes encryptedData = 9; // encrypted raw data for immutable
   bytes encryptedBlock = 16;
   
+  // immutable block
+  Key owningBlock = 19;
+
   // mutable block
   Key owner = 10;
   KeyHashList writers = 11;

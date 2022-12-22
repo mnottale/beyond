@@ -51,7 +51,7 @@ namespace Beyond
         {
             return State.backend.Insert(bak, ctx);
         }
-        public override Task<Error> Delete(Key k, ServerCallContext ctx)
+        public override Task<Error> Delete(BlockAndKey k, ServerCallContext ctx)
         {
             return State.backend.Delete(k, ctx);
         }
@@ -220,23 +220,40 @@ namespace Beyond
                 res.Add(null);
             return res;
         }
-        public async Task<Error> Delete(Key k, ServerCallContext ctx)
+        public async Task<Error> Delete(BlockAndKey bak, ServerCallContext ctx)
         {
-            var peers = await LocatePeers(k);
+            var peers = await LocatePeers(bak.Key);
             var tasks = new List<Task<Error>>();
             foreach (var p in State.peers)
             {
                 if (p == null)
-                    tasks.Add(DeleteBlock(k, ctx));
+                    tasks.Add(DeleteBlock(bak, ctx));
                 else
-                    tasks.Add(p.client.DeleteBlockAsync(k).ResponseAsync);
+                    tasks.Add(p.client.DeleteBlockAsync(bak).ResponseAsync);
             }
             await Task.WhenAll(tasks);
             return Utils.ErrorFromCode(Error.Types.ErrorCode.Ok);
         }
-        public override async Task<Error> DeleteBlock(Key k, ServerCallContext ctx)
+        public override async Task<Error> DeleteBlock(BlockAndKey bak, ServerCallContext ctx)
         {
-            State.storage.Delete(k);
+            if (State.crypto != null)
+            {
+                var target = await Query(bak.Key, ctx);
+                logger.LogInformation("Deletion target {block}", target);
+                Block owner = null;
+                if (target.OwningBlock != null)
+                {
+                    owner = await Query(target.OwningBlock, ctx);
+                    logger.LogInformation("Deletion owner {block}", owner);
+                }
+                var failCode = await State.crypto.VerifyDelete(bak, target, owner);
+                if (failCode != 0)
+                {
+                    logger.LogWarning("Deletion request for {key} denied with {code}", Utils.KeyString(bak.Key), failCode);
+                    return Utils.ErrorFromCode(Error.Types.ErrorCode.VerificationFailed);
+                }
+            }
+            State.storage.Delete(bak.Key);
             return Utils.ErrorFromCode(Error.Types.ErrorCode.Ok);
         }
         public async Task<Error> Insert(BlockAndKey bak, ServerCallContext ctx)
