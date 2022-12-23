@@ -93,6 +93,25 @@ from the parent directory. Inheritance flags are also inherited.
 Note that a writer of a directory can set it's content to anything, potentially
 unlinking files she does not have access to.
 
+Aditionally, you can create groups of users and add read permission to the group.
+
+To create a group, use:
+
+    xattr -w beyond.creategroup <groupname> mountpoint/
+
+replacing <groupname> with the name you want to give to the group.
+
+Then you can add the group through its alias to the readers of a file or directory;
+
+    xattr -w beyond.addreader <groupname> mountpoint/some/file
+
+The members of a group are its readers. To add a user key to the group, simply run;
+
+    xattr -w beyond.addreader <username> mountpoint/beyond:<groupname>
+
+the `beyond:something` is a special file at the root that allows pointing to a specific
+block by its alias or address.
+
 ## Future features and goals
 
   - Caching layer for faster usage

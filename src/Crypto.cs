@@ -17,6 +17,7 @@ public enum BlockChange
     Writers = 2,
     Readers = 4,
     All = 7,
+    GroupRemove = 8,
 }
 public class Crypto
 {
@@ -57,20 +58,29 @@ public class Crypto
         _logger.LogInformation("Key export {addr} {block}", Utils.KeyString(bak.Key), bak.Block);
         return bak;
     }
-    public async Task<AsymmetricAlgorithm> GetKey(Key sig)
+    public async Task<(AsymmetricAlgorithm, long)> GetKey(Key sig)
     {
         if (_keys.TryGetValue(sig, out var res))
-            return res;
+            return (res, 0);
         if (_ownerSig != null && _ownerSig.Equals(sig))
-            return _owner;
+            return (_owner, 0);
         var blk = await GetKeyBlock(sig);
+        byte[] data = null;
+        long version = 0;
+        if (blk.GroupVersion != 0)
+        {
+            data = blk.GroupPublicKey.ToByteArray();
+            version = blk.GroupVersion;
+        }
+        else
+            data = blk.Raw.ToByteArray();
         _logger.LogInformation("Key import {addr} {block}", Utils.KeyString(sig), blk);
-        var data = blk.Raw.ToByteArray();
         var aa = new RSACryptoServiceProvider(512);
         int br = 0;
         aa.ImportRSAPublicKey(data, out br);
-        _keys.Add(sig, aa);
-        return aa;
+        if (version == 0)
+            _keys.Add(sig, aa);
+        return (aa, version);
     }
     public byte[] Decrypt(byte[] input, AESKey key)
     {
@@ -138,6 +148,7 @@ public class Crypto
     }
     public async Task SealMutable(BlockAndKey bak, BlockChange bc, AESKey aes)
     {
+        _logger.LogInformation("PRE-Sealed block: {block}", bak.ToString());
         if (aes == null)
         {
             aes = new AESKey();
@@ -154,6 +165,17 @@ public class Crypto
         }
         else if (bak.Block.Owner == null)
             throw new System.Exception("Owner not set, but key set");
+        if ((bc & BlockChange.GroupRemove) != 0)
+        {
+            if (bak.Block.GroupKeys == null)
+                bak.Block.GroupKeys = new GroupKeyList();
+            bak.Block.GroupVersion += 1;
+            var k = new RSACryptoServiceProvider(2048);
+            var priv = k.ExportRSAPrivateKey();
+            var pub = k.ExportRSAPublicKey();
+            bak.Block.GroupKeys.Keys.Add(Google.Protobuf.ByteString.CopyFrom(priv));
+            bak.Block.GroupPublicKey = Google.Protobuf.ByteString.CopyFrom(pub);
+        }
         if ((bc & BlockChange.Data) != 0)
         {
             var bclear = new Block();
@@ -162,6 +184,7 @@ public class Crypto
             bclear.SymLink = bak.Block.SymLink;
             bclear.Mode = bak.Block.Mode;
             bclear.Aliases = bak.Block.Aliases;
+            bclear.GroupKeys = bak.Block.GroupKeys;
             var ser = bclear.ToByteArray();
             var enc = Encrypt(ser, aes);
             bak.Block.EncryptedBlock = Google.Protobuf.ByteString.CopyFrom(enc);
@@ -179,11 +202,12 @@ public class Crypto
                 var r = bak.Block.Readers.EncryptionKeys.Where(x=>x.Recipient.Equals(w)).FirstOrDefault();
                 if (r == null)
                 {
-                    var wk = await GetKey(w);
+                    var (wk, wv) = await GetKey(w);
                     var aesSer = aes.ToByteArray();
                     var crypted = (wk as RSA).Encrypt(aesSer, RSAEncryptionPadding.Pkcs1);
                     var ek = new EncryptionKey();
                     ek.Recipient = w;
+                    ek.GroupVersion = wv;
                     ek.EncryptedKeyIv = Google.Protobuf.ByteString.CopyFrom(crypted);
                     bak.Block.Readers.EncryptionKeys.Add(ek);
                     bc |= BlockChange.Readers; // notify we must resign readers
@@ -212,10 +236,11 @@ public class Crypto
             { // ensure everyone has a key
                 if (r.EncryptedKeyIv == null || r.EncryptedKeyIv.Length == 0)
                 {
-                    var wk = await GetKey(r.Recipient);
+                    var (wk,wv) = await GetKey(r.Recipient);
                     var aesSer = aes.ToByteArray();
                     var crypted = (wk as RSA).Encrypt(aesSer, RSAEncryptionPadding.Pkcs1);
                     r.EncryptedKeyIv = Google.Protobuf.ByteString.CopyFrom(crypted);
+                    r.GroupVersion = wv;
                 }
             }
             var ws = bak.Block.Readers.ToByteArray();
@@ -231,6 +256,7 @@ public class Crypto
         bak.Block.SymLink = null;
         bak.Block.Mode = "";
         bak.Block.Aliases = null;
+        bak.Block.GroupKeys = null;
         _logger.LogInformation("Sealed block: {block}", bak.ToString());
     }
     public Errno UnsealImmutable(BlockAndKey bak, AESKey aes)
@@ -239,33 +265,47 @@ public class Crypto
         bak.Block.Raw = Google.Protobuf.ByteString.CopyFrom(raw);
         return 0;
     }
-    public Errno ExtractKey(BlockAndKey bak, out AESKey aes)
+    public async Task<AESKey> ExtractKey(BlockAndKey bak)
     {
-        aes = null;
+        AESKey aes = null;
         if (bak.Block.Readers == null)
         {
             _logger.LogWarning("Empty reader block");
-            return Errno.EIO;
+            return null;
         }
         var me = bak.Block.Readers.EncryptionKeys.Where(x=>x.Recipient.Equals(_ownerSig)).FirstOrDefault();
         if (me == null)
         {
+            // try groups
+            foreach (var ek in bak.Block.Readers.EncryptionKeys.Where(x=>x.GroupVersion != 0))
+            {
+                var gb = await GetKeyBlock(ek.Recipient);
+                var gbk = new BlockAndKey { Key = ek.Recipient, Block = gb};
+                var uk = await UnsealMutable(gbk);
+                if (uk == null)
+                    continue;
+                var privb = gb.GroupKeys.Keys[(int)(ek.GroupVersion-1)].ToByteArray();
+                var k = new RSACryptoServiceProvider(512);
+                k.ImportRSAPrivateKey(privb, out _);
+                var aesSerg = k.Decrypt(ek.EncryptedKeyIv.ToByteArray(), RSAEncryptionPadding.Pkcs1);
+                using var msg = new MemoryStream(aesSerg);
+                return AESKey.Parser.ParseFrom(msg);
+            }
              _logger.LogWarning("fs owner not found in readers");
-            return Errno.EPERM;
+            return null;
         }
         var aesSer = (_owner as RSA).Decrypt(me.EncryptedKeyIv.ToByteArray(), RSAEncryptionPadding.Pkcs1);
         using var ms = new MemoryStream(aesSer);
-        aes = AESKey.Parser.ParseFrom(ms);
-        return 0;
+        return aes = AESKey.Parser.ParseFrom(ms);
     }
-    public Errno UnsealMutable(BlockAndKey bak, out AESKey aes)
+    public async Task<AESKey> UnsealMutable(BlockAndKey bak)
     {
         _logger.LogInformation("unsealing block: {block}", bak.ToString());
-        var err = ExtractKey(bak, out aes);
-        if (err != 0)
+        var aes = await ExtractKey(bak);
+        if (aes == null)
         {
             _logger.LogWarning("Key extraction failed");
-            return err;
+            return null;
         }
         var raw = Decrypt(bak.Block.EncryptedBlock.ToByteArray(), aes);
         using var msblock = new MemoryStream(raw);
@@ -275,7 +315,9 @@ public class Crypto
         bak.Block.SymLink = dblock.SymLink;
         bak.Block.Mode = dblock.Mode;
         bak.Block.Aliases = dblock.Aliases;
-        return 0;
+        bak.Block.GroupKeys = dblock.GroupKeys;
+         _logger.LogInformation("unsealed block: {block}", bak.ToString());
+        return aes;
     }
     public async Task<int> VerifyRead(BlockAndKey bak)
     {
@@ -290,9 +332,11 @@ public class Crypto
         var addr = Utils.Checksum(bak.Block.Owner.ToByteArray(), bak.Block.Salt.ToByteArray());
         if (!addr.Equals(bak.Key))
             return 2;
-        var bok = await GetKey(bak.Block.Owner);
+        var (bok, bv) = await GetKey(bak.Block.Owner);
         if (bok == null)
             return 10;
+        if (bv != 0)
+            return 12;
         var ok = true;
         if (bak.Block.Writers != null)
         {
@@ -316,9 +360,11 @@ public class Crypto
             var hit = bak.Block.Writers.KeyHashes.Where(x=>x.Equals(bak.Block.EncryptedDataSignature.KeyHash)).FirstOrDefault();
             if (hit == null)
                 return 8; // not a writer
-            bok = await GetKey(bak.Block.EncryptedDataSignature.KeyHash);
+            (bok, bv) = await GetKey(bak.Block.EncryptedDataSignature.KeyHash);
             if (bok == null)
                 return 11;
+            if (bv != 0)
+                return 14;
         }
         ok = (bok as RSA).VerifyData(
             bak.Block.EncryptedBlock.ToByteArray(),
@@ -344,7 +390,7 @@ public class Crypto
         Key allowed = target.OwningBlock != null ? owner.Owner : target.Owner;
         if (allowed == null)
             return 2;
-        var bok = await GetKey(allowed);
+        var (bok, bv) = await GetKey(allowed);
         if (! (bok as RSA).VerifyData(
             request.Key.ToByteArray(),
             request.Block.EncryptedDataSignature.Signature_.ToByteArray(),

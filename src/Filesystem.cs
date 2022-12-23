@@ -98,7 +98,7 @@ namespace Beyond
             var rp = new BlockAndKey();
             rp.Key = res.Block.Pointer;
             rp.Block = client.Query(rp.Key);
-            crypto.UnsealMutable(rp, out _);
+            crypto.UnsealMutable(rp).Wait();
             return rp;
         }
         protected Errno Get(string path, out BlockAndKey block, bool parent=false)
@@ -126,9 +126,9 @@ namespace Beyond
                         current.Block = blk;
                         if (crypto != null)
                         {
-                            var err = crypto.UnsealMutable(current, out _);
-                            if (err != 0)
-                                return err;
+                            var ok = crypto.UnsealMutable(current).Result;
+                            if (ok == null)
+                                return Errno.EPERM;
                         }
                         hit = true;
                         break;
@@ -146,6 +146,16 @@ namespace Beyond
         protected override Errno OnGetPathStatus (string path, out Stat buf)
 		{
 		    buf = new Stat();
+		    if (path.StartsWith("/beyond:"))
+		    {
+		        buf.st_mode = FilePermissions.S_IFREG |  NativeConvert.FromOctalPermissionString("644");
+		        buf.st_blksize = 65536;
+		        buf.st_uid = permUid;
+		        buf.st_gid = permGid;
+		        buf.st_nlink = 1;
+		        logger.LogInformation("STAT META {path} OK", path);
+		        return 0;
+		    }
 		    try
 		    {
 		        logger.LogInformation("STAT {path}", path);
@@ -180,8 +190,8 @@ namespace Beyond
 		            block.Block = rawblock;
 		            if (crypto != null)
 		            {
-		                err = crypto.UnsealMutable(block, out _);
-		                if (err != 0)
+		                var aes = crypto.UnsealMutable(block).Result;
+		                if (aes == null)
 		                {
 		                    logger.LogInformation("STAT {path} PARTIAL", path);
 		                    return 0;
@@ -257,7 +267,7 @@ namespace Beyond
 		    {
 		        if (crypto != null)
 		        {
-		            crypto.ExtractKey(block, out var aes); 
+		            var aes = crypto.ExtractKey(block).Result; 
 		            crypto.SealMutable(block, BlockChange.Data, aes).Wait();
 		        }
 		        var res = client.TransactionalUpdate(block);
@@ -544,6 +554,7 @@ namespace Beyond
 		            file.Block.Mode = NativeConvert.ToOctalPermissionString(mode.Value);
 		            if (crypto != null)
 		            {
+		                file.Block.Salt = Utils.RandomKey().Key_;
 		                file.Block.InheritReaders = parent.Block.InheritReaders;
 		                file.Block.InheritWriters = parent.Block.InheritWriters;
 		                crypto.Inherit(file, parent, file.Block.InheritReaders, file.Block.InheritWriters);
@@ -576,7 +587,7 @@ namespace Beyond
 		            return err;
 		        }
 		        else
-		            crypto?.ExtractKey(file, out key);
+		            key = crypto?.ExtractKey(file).Result;
 		        if (file.Block.File == null)
 		            file.Block.File = new FileIndex();
 		        openedFiles.TryAdd(path, new OpenedHandle
@@ -757,14 +768,16 @@ namespace Beyond
 		}
 		private Errno FlushFile(OpenedHandle oh)
 		{
+		    var fbc = oh.fileBlock;
+		    logger.LogInformation("Flush file with {block}", fbc);
+		    if (crypto != null)
+		    {
+		        fbc = fbc.Clone();
+		        fbc.Block = fbc.Block.Clone();
+		        crypto.SealMutable(fbc, BlockChange.Data, oh.key).Wait();
+		    }
 		    while (true)
 		    {
-		        var fbc = oh.fileBlock;
-		        if (crypto != null)
-		        {
-		            fbc = fbc.Clone();
-		            crypto.SealMutable(fbc, BlockChange.Data, oh.key).Wait();
-		        }
 		        var res = client.TransactionalUpdate(fbc);
 		        if (res.Code == Error.Types.ErrorCode.Ok)
 		            break;
@@ -774,7 +787,7 @@ namespace Beyond
 		          return Errno.EIO;
 		        logger.LogInformation("Flush retry from {version}", oh.fileBlock.Block.Version);
 		        var current = client.Query(oh.fileBlock.Key);
-		        oh.fileBlock.Block.Version = current.Version + 1;
+		        fbc.Block.Version = current.Version + 1;
 		    }
 		    return 0;
 		}
@@ -798,10 +811,10 @@ namespace Beyond
 		        client.Insert(bak);
 		        if (prevAddr != null)
 		            client.Delete(crypto.DeletionRequest(prevAddr, oh.fileBlock.Key));
-		         oh.fileBlock.Block.File.Blocks[chunkIndex].Address = bak.Key;
-		         oh.dirty = true;
-		         chunk.dirty = false;
-		         return 0;
+		        oh.fileBlock.Block.File.Blocks[chunkIndex].Address = bak.Key;
+		        oh.dirty = true;
+		        chunk.dirty = false;
+		        return 0;
 		    }
 		    while (true)
 		    {
@@ -876,7 +889,36 @@ namespace Beyond
 		    {
 		        try
 		        {
-		            var err = Get(path, out var file);
+		            BlockAndKey file = null;
+		            Errno err = 0;
+		            if (path.StartsWith("/beyond:"))
+		            {
+		                var bid = path.Substring("/beyond:".Length);
+		                if (bid.Length == 64)
+		                {
+		                    var k = Utils.StringKey(bid);
+		                    file = new BlockAndKey();
+		                    file.Key = k;
+		                    file.Block = client.Query(file.Key);
+		                }
+		                else
+		                {
+		                    err = Get("/", out var root);
+		                    if (err != 0)
+		                        return err;
+		                    var hit = root.Block.Aliases.KeyAliases.Where(x=>x.Alias == bid).FirstOrDefault();
+		                    if (hit == null)
+		                    {
+		                        logger.LogWarning("alias {alias} not found", bid);
+		                        return Errno.ENOENT;
+		                    }
+		                    file = new BlockAndKey();
+		                    file.Key = hit.KeyHash;
+		                    file.Block = client.Query(file.Key);
+		                }
+		            }
+		            else
+		                err = Get(path, out file);
 		            if (err != 0)
 		            {
 		                logger.LogWarning("setxattr failed to get {path} with {errno}", path, err);
@@ -891,10 +933,10 @@ namespace Beyond
 		                var pkb = client.Query(keyAddr);
 		                file.Block.Readers.EncryptionKeys.Add(new EncryptionKey { Recipient = keyAddr});
 		                file.Block.Version += 1;
-		                err = crypto.ExtractKey(file, out var key);
-		                if (err != 0)
-		                    return err;
-		                crypto.SealMutable(file, BlockChange.Readers, key).Wait();
+		                var bk = crypto.ExtractKey(file).Result;
+		                if (bk == null)
+		                    return Errno.EPERM;
+		                crypto.SealMutable(file, BlockChange.Readers, bk).Wait();
 		                var res = client.TransactionalUpdate(file);
 		                if (res.Code != Error.Types.ErrorCode.Ok)
 		                {
@@ -914,9 +956,9 @@ namespace Beyond
 		                    file.Block.Writers = new KeyHashList();
 		                file.Block.Version += 1;
 		                file.Block.Writers.KeyHashes.Add(keyAddr);
-		                err = crypto.ExtractKey(file, out var key);
-		                if (err != 0)
-		                    return err;
+		                var key = crypto.ExtractKey(file).Result;
+		                if (key == null)
+		                    return Errno.EPERM;
 		                crypto.SealMutable(file, BlockChange.Writers, key).Wait();
 		                var res = client.TransactionalUpdate(file);
 		                if (res.Code != Error.Types.ErrorCode.Ok)
@@ -940,9 +982,9 @@ namespace Beyond
 		                       KeyHash = keyAddr,
 		                   });
 		                file.Block.Version += 1;
-		                err = crypto.ExtractKey(file, out var key);
-		                if (err != 0)
-		                    return err;
+		                var key = crypto.ExtractKey(file).Result;
+		                if (key == null)
+		                    return Errno.EPERM;
 		                crypto.SealMutable(file, BlockChange.Data, key).Wait();
 		                var res = client.TransactionalUpdate(file);
 		                if (res.Code != Error.Types.ErrorCode.Ok)
@@ -958,14 +1000,47 @@ namespace Beyond
 		                file.Block.InheritReaders = mode.Contains("r");
 		                file.Block.InheritWriters = mode.Contains("w");
 		                file.Block.Version += 1;
-		                err = crypto.ExtractKey(file, out var key);
-		                if (err != 0)
-		                    return err;
+		                var key = crypto.ExtractKey(file).Result;
+		                if (key == null)
+		                    return Errno.EPERM;
 		                crypto.SealMutable(file, BlockChange.Data, key).Wait();
 		                var res = client.TransactionalUpdate(file);
 		                if (res.Code != Error.Types.ErrorCode.Ok)
 		                {
 		                    logger.LogWarning("addreader failed with code {code}", res.Code);
+		                    return Errno.EIO;
+		                }
+		                return 0;
+		            }
+		            if (name == "beyond.creategroup")
+		            {
+		                var ga = System.Text.Encoding.UTF8.GetString(value);
+		                var bak = new BlockAndKey();
+		                bak.Block = new Block();
+		                crypto.SealMutable(bak, BlockChange.Data | BlockChange.GroupRemove, null).Wait();
+		                var res = client.Insert(bak);
+		                if (res.Code != Error.Types.ErrorCode.Ok)
+		                {
+		                    logger.LogWarning("addgroup failed with code {code}", res.Code);
+		                    return Errno.EIO;
+		                }
+		                //alias it
+		                if (file.Block.Aliases == null)
+		                    file.Block.Aliases = new KeyAliasList();
+		                file.Block.Aliases.KeyAliases.Add(new KeyAlias
+		                   {
+		                       Alias = ga,
+		                       KeyHash = bak.Key,
+		                   });
+		                file.Block.Version += 1;
+		                var ka = crypto.ExtractKey(file).Result;
+		                if (ka == null)
+		                    return Errno.EPERM;
+		                crypto.SealMutable(file, BlockChange.Data, ka).Wait();
+		                res = client.TransactionalUpdate(file);
+		                if (res.Code != Error.Types.ErrorCode.Ok)
+		                {
+		                    logger.LogWarning("add group alias failed with code {code}", res.Code);
 		                    return Errno.EIO;
 		                }
 		                return 0;

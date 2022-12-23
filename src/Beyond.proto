@@ -111,6 +111,10 @@ message KeyAlias {
   string alias = 1;
   Key keyHash = 2;
 }
+message GroupKeyList {
+  repeated bytes keys = 1;
+}
+
 message Block {
   int64 version = 1;
   bytes raw = 2;
@@ -119,12 +123,16 @@ message Block {
   bool inheritReaders = 20;
   bool inheritWriters = 21;
 
+  bytes groupPublicKey = 23;
+  int64 groupVersion = 24;
+
   // maybe encrypted stuff, FIXME submessage
   FileIndex file = 3;
   DirectoryIndex directory = 4;
   SymLink symLink = 6;
   string mode = 7;
   KeyAliasList aliases = 18;
+  GroupKeyList groupKeys = 22; // priv keys
 
   // crypto on
   
@@ -186,6 +194,7 @@ message AESKey {
 message EncryptionKey {
   Key recipient = 1;
   bytes encryptedKeyIv = 2;
+  int64 groupVersion = 3;
 }
 
 message EncryptionKeyList {
