@@ -215,6 +215,8 @@ namespace Beyond
 		        logger.LogInformation("MODE POST {mode}", buf.st_mode);
 		        buf.st_size = (block.Block.Data.File != null) ? (long)block.Block.Data.File.Size : 1024;
 		        buf.st_blocks = buf.st_size / 512;
+		        buf.st_ctime = block.Block.Ctime;
+		        buf.st_mtime = block.Block.Mtime;
 
 		        logger.LogInformation("STAT {path} OK", path);
 		        return 0;
@@ -314,6 +316,8 @@ namespace Beyond
 		    bak.Block.Data.Mode = NativeConvert.ToOctalPermissionString(mode);
 		    bak.Block.InheritReaders = parent.Block.InheritReaders;
 		    bak.Block.InheritWriters = parent.Block.InheritWriters;
+		    bak.Block.Mtime = DateTimeOffset.Now.ToUnixTimeSeconds();
+		    bak.Block.Ctime = bak.Block.Mtime;
 		    if (crypto != null)
 		    {
 		        crypto.Inherit(bak, parent, bak.Block.InheritReaders, bak.Block.InheritWriters);
@@ -567,6 +571,8 @@ namespace Beyond
 		            file.Block.Version = 1;
 		            file.Block.Data = new BlockData();
 		            file.Block.Data.Mode = NativeConvert.ToOctalPermissionString(mode.Value);
+		            file.Block.Mtime = DateTimeOffset.Now.ToUnixTimeSeconds();
+		            file.Block.Ctime = file.Block.Mtime;
 		            if (crypto != null)
 		            {
 		                file.Block.Salt = Utils.RandomKey().Key_;
@@ -784,6 +790,7 @@ namespace Beyond
 		private Errno FlushFile(OpenedHandle oh)
 		{
 		    logger.LogInformation("Flush file with {block}", oh.fileBlock);
+		    oh.fileBlock.Block.Mtime = DateTimeOffset.Now.ToUnixTimeSeconds();
 		    while (true)
 		    {
 		        var fbc = oh.fileBlock;

@@ -135,6 +135,8 @@ message Block {
   bytes raw = 2;
   BlockOwnership owners = 5;
 
+  int64 ctime = 25;
+  int64 mtime = 26;
   bool inheritReaders = 20;
   bool inheritWriters = 21;
 
