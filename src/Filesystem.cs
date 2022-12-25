@@ -427,6 +427,16 @@ namespace Beyond
 		    file.Block.Data = new BlockData();
 		    file.Block.Data.SymLink = new SymLink();
 		    file.Block.Data.SymLink.Target = target;
+		    file.Block.Data.Mode = "777";
+		    if (crypto != null)
+		    {
+		        file.Key = null;
+		        file.Block.Salt = Utils.RandomKey().Key_;
+		        var key = new AESKey();
+		        key.Key = Utils.RandomKey().Key_;
+		        key.Iv = Utils.RandomKey().Key_;
+		        crypto.SealMutable(file, BlockChange.All, key).Wait();
+		    }
 		    client.Insert(file);
 		    var dirent = new DirectoryEntry();
 		    dirent.EntryType = DirectoryEntry.Types.EntryType.Symlink;
@@ -773,16 +783,16 @@ namespace Beyond
 		}
 		private Errno FlushFile(OpenedHandle oh)
 		{
-		    var fbc = oh.fileBlock;
-		    logger.LogInformation("Flush file with {block}", fbc);
-		    if (crypto != null)
-		    {
-		        fbc = fbc.Clone();
-		        fbc.Block = fbc.Block.Clone();
-		        crypto.SealMutable(fbc, BlockChange.Data, oh.key).Wait();
-		    }
+		    logger.LogInformation("Flush file with {block}", oh.fileBlock);
 		    while (true)
 		    {
+		        var fbc = oh.fileBlock;
+		        if (crypto != null)
+		        {
+		            fbc = fbc.Clone();
+		            fbc.Block = fbc.Block.Clone();
+		            crypto.SealMutable(fbc, BlockChange.Data, oh.key).Wait();
+		        }
 		        var res = client.TransactionalUpdate(fbc);
 		        if (res.Code == Error.Types.ErrorCode.Ok)
 		            break;
@@ -792,7 +802,7 @@ namespace Beyond
 		          return Errno.EIO;
 		        logger.LogInformation("Flush retry from {version}", oh.fileBlock.Block.Version);
 		        var current = client.Query(oh.fileBlock.Key);
-		        fbc.Block.Version = current.Version + 1;
+		        oh.fileBlock.Block.Version = current.Version + 1;
 		    }
 		    return 0;
 		}

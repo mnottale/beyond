@@ -139,11 +139,11 @@ public class Crypto
         {
             bak.Block.Salt = Utils.RandomKey().Key_;
         }
-        bak.Block.EncryptedData = Google.Protobuf.ByteString.CopyFrom(
+        bak.Block.Signed = new SignedData();
+        bak.Block.Signed.EncryptedData = Google.Protobuf.ByteString.CopyFrom(
                 Encrypt(bak.Block.Raw.ToByteArray(), aes));
-        var addr = Utils.Checksum(bak.Block.Salt.ToByteArray(), bak.Block.EncryptedData.ToByteArray());
-        bak.Key = new Key();
-        bak.Key.Key_ = addr.Key_;
+        var addr = Utils.Checksum(bak.Block.Salt.ToByteArray(), bak.Block.Signed.EncryptedData.ToByteArray());
+        bak.Key = addr;
         bak.Block.Raw = Google.Protobuf.ByteString.Empty;
     }
     public async Task SealMutable(BlockAndKey bak, BlockChange bc, AESKey aes)
@@ -180,9 +180,11 @@ public class Crypto
         {
             var ser = bak.Block.Data.ToByteArray();
             var enc = Encrypt(ser, aes);
-            bak.Block.EncryptedBlock = Google.Protobuf.ByteString.CopyFrom(enc);
+            bak.Block.Signed = new SignedData();
+            bak.Block.Signed.EncryptedBlock = Google.Protobuf.ByteString.CopyFrom(enc);
+            bak.Block.Signed.Version = bak.Block.Version;
             //sign
-            var sig = (_owner as RSA).SignData(enc, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+            var sig = (_owner as RSA).SignData(bak.Block.Signed.ToByteArray(), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
             bak.Block.EncryptedDataSignature = new Signature();
             bak.Block.EncryptedDataSignature.KeyHash = _ownerSig;
             bak.Block.EncryptedDataSignature.Signature_ = Google.Protobuf.ByteString.CopyFrom(sig);
@@ -249,7 +251,7 @@ public class Crypto
     }
     public Errno UnsealImmutable(BlockAndKey bak, AESKey aes)
     {
-        var raw = Decrypt(bak.Block.EncryptedData.ToByteArray(), aes);
+        var raw = Decrypt(bak.Block.Signed.EncryptedData.ToByteArray(), aes);
         bak.Block.Raw = Google.Protobuf.ByteString.CopyFrom(raw);
         return 0;
     }
@@ -295,7 +297,7 @@ public class Crypto
             _logger.LogWarning("Key extraction failed");
             return null;
         }
-        var raw = Decrypt(bak.Block.EncryptedBlock.ToByteArray(), aes);
+        var raw = Decrypt(bak.Block.Signed.EncryptedBlock.ToByteArray(), aes);
         using var msblock = new MemoryStream(raw);
         var dblock = BlockData.Parser.ParseFrom(msblock);
         bak.Block.Data = dblock;
@@ -306,7 +308,7 @@ public class Crypto
     {
         if (bak.Block.Owner == null)
         { // immutable
-            var iaddr = Utils.Checksum(bak.Block.Salt.ToByteArray(), bak.Block.EncryptedData.ToByteArray());
+            var iaddr = Utils.Checksum(bak.Block.Salt.ToByteArray(), bak.Block.Signed.EncryptedData.ToByteArray());
             if (!iaddr.Equals(bak.Key))
                 return 1;
             return 0;
@@ -350,11 +352,13 @@ public class Crypto
                 return 14;
         }
         ok = (bok as RSA).VerifyData(
-            bak.Block.EncryptedBlock.ToByteArray(),
+            bak.Block.Signed.ToByteArray(),
             bak.Block.EncryptedDataSignature.Signature_.ToByteArray(),
             HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         if (!ok)
             return 9;
+        if (bak.Block.Signed.Version != bak.Block.Version)
+            return 15;
         return 0;
     }
     public async Task<int> VerifyWrite(BlockAndKey bak, BlockAndKey previous)

@@ -124,6 +124,12 @@ message BlockData {
   GroupKeyList groupKeys = 6; // priv keys
 }
 
+message SignedData {
+  int64 version = 1;
+  bytes encryptedData = 2; // encrypted raw data for immutable
+  bytes encryptedBlock = 3;
+}
+
 message Block {
   int64 version = 1;
   bytes raw = 2;
@@ -139,11 +145,9 @@ message Block {
   BlockData data = 3;
 
   // crypto on
-  
+  SignedData signed = 9;
   bytes salt = 8;
-  bytes encryptedData = 9; // encrypted raw data for immutable
-  bytes encryptedBlock = 16;
-  
+
   // immutable block
   Key owningBlock = 19;
 
