@@ -167,25 +167,18 @@ public class Crypto
             throw new System.Exception("Owner not set, but key set");
         if ((bc & BlockChange.GroupRemove) != 0)
         {
-            if (bak.Block.GroupKeys == null)
-                bak.Block.GroupKeys = new GroupKeyList();
+            if (bak.Block.Data.GroupKeys == null)
+                bak.Block.Data.GroupKeys = new GroupKeyList();
             bak.Block.GroupVersion += 1;
             var k = new RSACryptoServiceProvider(2048);
             var priv = k.ExportRSAPrivateKey();
             var pub = k.ExportRSAPublicKey();
-            bak.Block.GroupKeys.Keys.Add(Google.Protobuf.ByteString.CopyFrom(priv));
+            bak.Block.Data.GroupKeys.Keys.Add(Google.Protobuf.ByteString.CopyFrom(priv));
             bak.Block.GroupPublicKey = Google.Protobuf.ByteString.CopyFrom(pub);
         }
         if ((bc & BlockChange.Data) != 0)
         {
-            var bclear = new Block();
-            bclear.File = bak.Block.File;
-            bclear.Directory = bak.Block.Directory;
-            bclear.SymLink = bak.Block.SymLink;
-            bclear.Mode = bak.Block.Mode;
-            bclear.Aliases = bak.Block.Aliases;
-            bclear.GroupKeys = bak.Block.GroupKeys;
-            var ser = bclear.ToByteArray();
+            var ser = bak.Block.Data.ToByteArray();
             var enc = Encrypt(ser, aes);
             bak.Block.EncryptedBlock = Google.Protobuf.ByteString.CopyFrom(enc);
             //sign
@@ -251,12 +244,7 @@ public class Crypto
         }
         // clear plaintext fields
         bak.Block.Raw = ByteString.Empty;
-        bak.Block.File = null;
-        bak.Block.Directory = null;
-        bak.Block.SymLink = null;
-        bak.Block.Mode = "";
-        bak.Block.Aliases = null;
-        bak.Block.GroupKeys = null;
+        bak.Block.Data = null;
         _logger.LogInformation("Sealed block: {block}", bak.ToString());
     }
     public Errno UnsealImmutable(BlockAndKey bak, AESKey aes)
@@ -284,7 +272,7 @@ public class Crypto
                 var uk = await UnsealMutable(gbk);
                 if (uk == null)
                     continue;
-                var privb = gb.GroupKeys.Keys[(int)(ek.GroupVersion-1)].ToByteArray();
+                var privb = gb.Data.GroupKeys.Keys[(int)(ek.GroupVersion-1)].ToByteArray();
                 var k = new RSACryptoServiceProvider(512);
                 k.ImportRSAPrivateKey(privb, out _);
                 var aesSerg = k.Decrypt(ek.EncryptedKeyIv.ToByteArray(), RSAEncryptionPadding.Pkcs1);
@@ -309,13 +297,8 @@ public class Crypto
         }
         var raw = Decrypt(bak.Block.EncryptedBlock.ToByteArray(), aes);
         using var msblock = new MemoryStream(raw);
-        var dblock = Block.Parser.ParseFrom(msblock);
-        bak.Block.File = dblock.File;
-        bak.Block.Directory = dblock.Directory;
-        bak.Block.SymLink = dblock.SymLink;
-        bak.Block.Mode = dblock.Mode;
-        bak.Block.Aliases = dblock.Aliases;
-        bak.Block.GroupKeys = dblock.GroupKeys;
+        var dblock = BlockData.Parser.ParseFrom(msblock);
+        bak.Block.Data = dblock;
          _logger.LogInformation("unsealed block: {block}", bak.ToString());
         return aes;
     }

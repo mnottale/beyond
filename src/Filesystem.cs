@@ -56,8 +56,9 @@ namespace Beyond
                 var root = new BlockAndKey();
                 root.Block = new Block();
                 root.Block.Version = 1;
-                root.Block.Directory = new DirectoryIndex();
-                root.Block.Mode = "777";
+                root.Block.Data = new BlockData();
+                root.Block.Data.Directory = new DirectoryIndex();
+                root.Block.Data.Mode = "777";
                 crypto.SealMutable(root, BlockChange.Data | BlockChange.Readers, null).Wait();
                 client.Insert(root);
                 var ptr = new BlockAndKey();
@@ -72,8 +73,9 @@ namespace Beyond
                 root.Key = RootAddress();
                 root.Block = new Block();
                 root.Block.Version = 1;
-                root.Block.Directory = new DirectoryIndex();
-                root.Block.Mode = "777";
+                root.Block.Data = new BlockData();
+                root.Block.Data.Directory = new DirectoryIndex();
+                root.Block.Data.Mode = "777";
                 client.Insert(root);
             }
         }
@@ -112,12 +114,12 @@ namespace Beyond
                 if (components[i] == "")
                     continue;
                 var hit = false;
-                if (current?.Block?.Directory?.Entries == null)
+                if (current?.Block?.Data?.Directory?.Entries == null)
                 {
                     logger.LogInformation("null data at {index}", i);
                     return Errno.ENOENT;
                 }
-                foreach (var ent in current.Block.Directory.Entries)
+                foreach (var ent in current.Block.Data.Directory.Entries)
                 {
                     if (ent.Name == components[i])
                     {
@@ -176,7 +178,7 @@ namespace Beyond
 		        }
 		        else
 		        {
-		            var hit = parent.Block.Directory?.Entries?.Where(x=>x.Name == filename).FirstOrDefault();
+		            var hit = parent.Block.Data?.Directory?.Entries?.Where(x=>x.Name == filename).FirstOrDefault();
 		            if (hit == null)
 		                return Errno.ENOENT;
 		            buf.st_mode = hit.EntryType switch
@@ -206,12 +208,12 @@ namespace Beyond
 		        buf.st_gid = permGid;
 		        buf.st_nlink = 1;
 
-		        buf.st_mode |= NativeConvert.FromOctalPermissionString(block.Block.Mode);
+		        buf.st_mode |= NativeConvert.FromOctalPermissionString(block.Block.Data.Mode);
 		        if (!writeable)
 		            buf.st_mode &= ~(FilePermissions.S_IWUSR | FilePermissions.S_IWGRP | FilePermissions.S_IWOTH);
 		        logger.LogInformation("MODE PRE {mode}", buf.st_mode);
 		        logger.LogInformation("MODE POST {mode}", buf.st_mode);
-		        buf.st_size = (block.Block.File != null) ? (long)block.Block.File.Size : 1024;
+		        buf.st_size = (block.Block.Data.File != null) ? (long)block.Block.Data.File.Size : 1024;
 		        buf.st_blocks = buf.st_size / 512;
 
 		        logger.LogInformation("STAT {path} OK", path);
@@ -235,7 +237,7 @@ namespace Beyond
 		    var err = Get(path, out file);
 		    if (err != 0)
 		        return err;
-		    target = file.Block.SymLink.Target;
+		    target = file.Block.Data.SymLink.Target;
 		    return 0;
 		}
 		protected override Errno OnReadDirectory (string directory, OpenedPathInfo info, 
@@ -248,7 +250,7 @@ namespace Beyond
 		    if (err != 0)
 		        return err;
 		    var res = new List<Mono.Fuse.NETStandard.DirectoryEntry>();
-		    foreach (var ent in block.Block.Directory.Entries)
+		    foreach (var ent in block.Block.Data.Directory.Entries)
 		    {
 		        res.Add(new Mono.Fuse.NETStandard.DirectoryEntry(ent.Name));
 		    }
@@ -307,8 +309,9 @@ namespace Beyond
 		        bak.Key = Utils.RandomKey();
 		    bak.Block = new Block();
 		    bak.Block.Version = 1;
-		    bak.Block.Directory = new DirectoryIndex();
-		    bak.Block.Mode = NativeConvert.ToOctalPermissionString(mode);
+		    bak.Block.Data = new BlockData();
+		    bak.Block.Data.Directory = new DirectoryIndex();
+		    bak.Block.Data.Mode = NativeConvert.ToOctalPermissionString(mode);
 		    bak.Block.InheritReaders = parent.Block.InheritReaders;
 		    bak.Block.InheritWriters = parent.Block.InheritWriters;
 		    if (crypto != null)
@@ -323,7 +326,7 @@ namespace Beyond
 		    dirent.Address = bak.Key;
 		    // then link it
 		    UpdateBlock(path, true, parent, p => {
-		            p.Block.Directory.Entries.Add(dirent);
+		            p.Block.Data.Directory.Entries.Add(dirent);
 		            p.Block.Version = p.Block.Version + 1;
 		    });
 		    return 0;
@@ -331,12 +334,12 @@ namespace Beyond
 		private Errno Unlink(string filePath, BlockAndKey dir, string name)
 		{
 		    return UpdateBlock(filePath, true, dir, p => {
-		            var count = p.Block.Directory.Entries.Count;
+		            var count = p.Block.Data.Directory.Entries.Count;
 		            for (var i = 0; i<count; ++i)
 		            {
-		                if (p.Block.Directory.Entries[i].Name == name)
+		                if (p.Block.Data.Directory.Entries[i].Name == name)
 		                {
-		                    p.Block.Directory.Entries.RemoveAt(i);
+		                    p.Block.Data.Directory.Entries.RemoveAt(i);
 		                    p.Block.Version = p.Block.Version + 1;
 		                    return;
 		                }
@@ -364,9 +367,9 @@ namespace Beyond
 		    err = Unlink(path, parent, fileName);
 		    if (err != 0)
 		        return err;
-		    if (file.Block.File != null)
+		    if (file.Block.Data.File != null)
 		    {
-		        foreach (var b in file.Block.File.Blocks)
+		        foreach (var b in file.Block.Data.File.Blocks)
 		        {
 		            if (crypto != null)
 		                client.Delete(crypto.DeletionRequest(b.Address, file.Key));
@@ -389,7 +392,7 @@ namespace Beyond
 		    var err = Get(path, out file);
 		    if (err != 0)
 		        return err;
-		    if (file.Block.Directory.Entries.Count != 0)
+		    if (file.Block.Data.Directory.Entries.Count != 0)
 		        return Errno.ENOTEMPTY;
 		    BlockAndKey parent;
 		    err = Get(path, out parent, parent: true);
@@ -421,8 +424,9 @@ namespace Beyond
 		    file.Key = Utils.RandomKey();
 		    file.Block = new Block();
 		    file.Block.Version = 1;
-		    file.Block.SymLink = new SymLink();
-		    file.Block.SymLink.Target = target;
+		    file.Block.Data = new BlockData();
+		    file.Block.Data.SymLink = new SymLink();
+		    file.Block.Data.SymLink.Target = target;
 		    client.Insert(file);
 		    var dirent = new DirectoryEntry();
 		    dirent.EntryType = DirectoryEntry.Types.EntryType.Symlink;
@@ -430,7 +434,7 @@ namespace Beyond
 		    dirent.Address = file.Key;
 		    err = UpdateBlock(path, true, parent, b => {
 		            b.Block.Version = b.Block.Version + 1;
-		            b.Block.Directory.Entries.Add(dirent);
+		            b.Block.Data.Directory.Entries.Add(dirent);
 		    });
 		    return 0;
 		}
@@ -449,7 +453,7 @@ namespace Beyond
 		    err = Get(to, out todir, parent:true);
 		    if (err != 0)
 		        return err;
-		    var exists = todir.Block.Directory.Entries.Where(e=>e.Name == fileNameTo).FirstOrDefault();
+		    var exists = todir.Block.Data.Directory.Entries.Where(e=>e.Name == fileNameTo).FirstOrDefault();
 		    if (exists != null)
 		    {
 		        if (exists.EntryType == DirectoryEntry.Types.EntryType.Directory)
@@ -458,7 +462,7 @@ namespace Beyond
 		        if (err != 0)
 		            return err;
 		    }
-		    var de = fromdir.Block.Directory.Entries.Where(e=>e.Name == fileNameFrom).FirstOrDefault();
+		    var de = fromdir.Block.Data.Directory.Entries.Where(e=>e.Name == fileNameFrom).FirstOrDefault();
 		    if (de == null)
 		        return Errno.ENOENT;
 		    var det = new DirectoryEntry();
@@ -467,15 +471,15 @@ namespace Beyond
 		    det.Address = de.Address;
 		    err = UpdateBlock(to, true, todir, b => {
 		            b.Block.Version = b.Block.Version + 1;
-		            b.Block.Directory.Entries.Add(det);
+		            b.Block.Data.Directory.Entries.Add(det);
 		    });
 		    if (err != 0)
 		        return err;
 		    err = UpdateBlock(from, true, fromdir, b => {
 		            b.Block.Version = b.Block.Version + 1;
-		            var deb = b.Block.Directory.Entries.Where(e=>e.Name == fileNameFrom).FirstOrDefault();
+		            var deb = b.Block.Data.Directory.Entries.Where(e=>e.Name == fileNameFrom).FirstOrDefault();
 		            if (deb != null)
-		                b.Block.Directory.Entries.Remove(deb);
+		                b.Block.Data.Directory.Entries.Remove(deb);
 		    });
 		    if (err != 0)
 		        return err;
@@ -494,7 +498,7 @@ namespace Beyond
 		        return err;
 		    err = UpdateBlock(path, true, block, b => {
 		            b.Block.Version = b.Block.Version + 1;
-		            b.Block.Mode = NativeConvert.ToOctalPermissionString(mode);
+		            b.Block.Data.Mode = NativeConvert.ToOctalPermissionString(mode);
 		    });
 		    return err;
 		}
@@ -551,7 +555,8 @@ namespace Beyond
 		            file.Key = Utils.RandomKey();
 		            file.Block = new Block();
 		            file.Block.Version = 1;
-		            file.Block.Mode = NativeConvert.ToOctalPermissionString(mode.Value);
+		            file.Block.Data = new BlockData();
+		            file.Block.Data.Mode = NativeConvert.ToOctalPermissionString(mode.Value);
 		            if (crypto != null)
 		            {
 		                file.Block.Salt = Utils.RandomKey().Key_;
@@ -578,7 +583,7 @@ namespace Beyond
 		            dirent.Address = file.Key;
 		            err = UpdateBlock(path, true, parent, b => {
 		                    b.Block.Version = b.Block.Version + 1;
-		                    b.Block.Directory.Entries.Add(dirent);
+		                    b.Block.Data.Directory.Entries.Add(dirent);
 		            });
 		        }
 		        else if (err != 0)
@@ -588,8 +593,8 @@ namespace Beyond
 		        }
 		        else
 		            key = crypto?.ExtractKey(file).Result;
-		        if (file.Block.File == null)
-		            file.Block.File = new FileIndex();
+		        if (file.Block.Data.File == null)
+		            file.Block.Data.File = new FileIndex();
 		        openedFiles.TryAdd(path, new OpenedHandle
 		            {
 		                openCount = 1,
@@ -611,9 +616,9 @@ namespace Beyond
 		    nRead = 0;
 		    if (!oh.chunks.TryGetValue(chunkIndex, out var chunk))
 		    {
-		        if (chunkIndex >= (ulong)oh.fileBlock.Block.File.Blocks.Count)
+		        if (chunkIndex >= (ulong)oh.fileBlock.Block.Data.File.Blocks.Count)
 		            return 0;
-		        var baddr = oh.fileBlock.Block.File.Blocks[(int)chunkIndex].Address;
+		        var baddr = oh.fileBlock.Block.Data.File.Blocks[(int)chunkIndex].Address;
 		        var block = client.Query(baddr);
 		        if (crypto != null)
 		        {
@@ -672,9 +677,9 @@ namespace Beyond
 		    nWrite = 0;
 		    if (!oh.chunks.TryGetValue(chunkIndex, out var chunk))
 		    {
-		        if (chunkIndex >= (ulong)oh.fileBlock.Block.File.Blocks.Count)
+		        if (chunkIndex >= (ulong)oh.fileBlock.Block.Data.File.Blocks.Count)
 		        {
-		            for (int ci = oh.fileBlock.Block.File.Blocks.Count; ci <= (int)chunkIndex; ++ci)
+		            for (int ci = oh.fileBlock.Block.Data.File.Blocks.Count; ci <= (int)chunkIndex; ++ci)
 		            {
 		                BlockAndKey bak = new BlockAndKey();
 		                if (crypto == null)
@@ -686,7 +691,7 @@ namespace Beyond
 		                }
 		                var fb = new FileBlock();
 		                fb.Address = bak.Key;
-		                oh.fileBlock.Block.File.Blocks.Add(fb);
+		                oh.fileBlock.Block.Data.File.Blocks.Add(fb);
 		                oh.dirty = true;
 		            }
 		            chunk = new FileChunk
@@ -699,7 +704,7 @@ namespace Beyond
 		        }
 		        else
 		        {
-		            var baddr = oh.fileBlock.Block.File.Blocks[(int)chunkIndex].Address;
+		            var baddr = oh.fileBlock.Block.Data.File.Blocks[(int)chunkIndex].Address;
 		            var bl = client.Query(baddr);
 		            if (crypto != null)
 		            {
@@ -752,9 +757,9 @@ namespace Beyond
 		            bytesWritten += wr;
 		        }
 		        ulong newSz = (ulong)offset + (ulong)buf.Length;
-		        if (oh.fileBlock.Block.File.Size < newSz)
+		        if (oh.fileBlock.Block.Data.File.Size < newSz)
 		        {
-		            oh.fileBlock.Block.File.Size = newSz;
+		            oh.fileBlock.Block.Data.File.Size = newSz;
 		            oh.dirty = true;
 		        }
 		    }
@@ -796,7 +801,7 @@ namespace Beyond
 		    if (!oh.chunks.TryGetValue((ulong)chunkIndex, out var chunk))
 		        return 0;
 		    var bak = new BlockAndKey();
-		    bak.Key = oh.fileBlock.Block.File.Blocks[chunkIndex].Address;
+		    bak.Key = oh.fileBlock.Block.Data.File.Blocks[chunkIndex].Address;
 		    bak.Block = new Block();
 		    bak.Block.Version = (long)(chunk.version+1);
 		    bak.Block.Raw = Google.Protobuf.ByteString.CopyFrom(chunk.data);
@@ -811,7 +816,7 @@ namespace Beyond
 		        client.Insert(bak);
 		        if (prevAddr != null)
 		            client.Delete(crypto.DeletionRequest(prevAddr, oh.fileBlock.Key));
-		        oh.fileBlock.Block.File.Blocks[chunkIndex].Address = bak.Key;
+		        oh.fileBlock.Block.Data.File.Blocks[chunkIndex].Address = bak.Key;
 		        oh.dirty = true;
 		        chunk.dirty = false;
 		        return 0;
@@ -878,7 +883,7 @@ namespace Beyond
 		    var err = Get("/", out var file);
 		    if (err != 0)
 		        return null;
-		    var hit = file.Block.Aliases.KeyAliases.Where(x=>x.Alias == als).FirstOrDefault();
+		    var hit = file.Block.Data.Aliases.KeyAliases.Where(x=>x.Alias == als).FirstOrDefault();
 		    if (hit == null)
 		        return null;
 		    return hit.KeyHash;
@@ -906,7 +911,7 @@ namespace Beyond
 		                    err = Get("/", out var root);
 		                    if (err != 0)
 		                        return err;
-		                    var hit = root.Block.Aliases.KeyAliases.Where(x=>x.Alias == bid).FirstOrDefault();
+		                    var hit = root.Block.Data.Aliases.KeyAliases.Where(x=>x.Alias == bid).FirstOrDefault();
 		                    if (hit == null)
 		                    {
 		                        logger.LogWarning("alias {alias} not found", bid);
@@ -974,9 +979,9 @@ namespace Beyond
 		                var als = ak[0];
 		                var keyAddr = Utils.StringKey(ak[1]);
 		                var pkb = client.Query(keyAddr);
-		                if (file.Block.Aliases == null)
-		                    file.Block.Aliases = new KeyAliasList();
-		                file.Block.Aliases.KeyAliases.Add(new KeyAlias
+		                if (file.Block.Data.Aliases == null)
+		                    file.Block.Data.Aliases = new KeyAliasList();
+		                file.Block.Data.Aliases.KeyAliases.Add(new KeyAlias
 		                   {
 		                       Alias = als,
 		                       KeyHash = keyAddr,
@@ -1025,9 +1030,9 @@ namespace Beyond
 		                    return Errno.EIO;
 		                }
 		                //alias it
-		                if (file.Block.Aliases == null)
-		                    file.Block.Aliases = new KeyAliasList();
-		                file.Block.Aliases.KeyAliases.Add(new KeyAlias
+		                if (file.Block.Data.Aliases == null)
+		                    file.Block.Data.Aliases = new KeyAliasList();
+		                file.Block.Data.Aliases.KeyAliases.Add(new KeyAlias
 		                   {
 		                       Alias = ga,
 		                       KeyHash = bak.Key,

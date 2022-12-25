@@ -115,6 +115,15 @@ message GroupKeyList {
   repeated bytes keys = 1;
 }
 
+message BlockData {
+  FileIndex file = 1;
+  DirectoryIndex directory = 2;
+  SymLink symLink = 3;
+  string mode = 4;
+  KeyAliasList aliases = 5;
+  GroupKeyList groupKeys = 6; // priv keys
+}
+
 message Block {
   int64 version = 1;
   bytes raw = 2;
@@ -126,13 +135,8 @@ message Block {
   bytes groupPublicKey = 23;
   int64 groupVersion = 24;
 
-  // maybe encrypted stuff, FIXME submessage
-  FileIndex file = 3;
-  DirectoryIndex directory = 4;
-  SymLink symLink = 6;
-  string mode = 7;
-  KeyAliasList aliases = 18;
-  GroupKeyList groupKeys = 22; // priv keys
+  // maybe encrypted stuff
+  BlockData data = 3;
 
   // crypto on
   
