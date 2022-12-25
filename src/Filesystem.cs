@@ -531,14 +531,16 @@ namespace Beyond
 		}
 		protected override Errno OnCreateHandle (string file, OpenedPathInfo info, FilePermissions mode)
 		{
-			return OpenOrCreate(file, true, mode);
+			return OpenOrCreate(file, true, info, mode);
 		}
 		protected override Errno OnOpenHandle (string path, OpenedPathInfo info)
 		{
-		    return OpenOrCreate(path, false);
+		    return OpenOrCreate(path, false, info);
 		}
-		private Errno OpenOrCreate(string path, bool allowCreation, FilePermissions? mode=null)
+		private Errno OpenOrCreate(string path, bool allowCreation, OpenedPathInfo info, FilePermissions? mode=null)
 		{
+		    var amask = info.OpenFlags  & (OpenFlags.O_RDONLY | OpenFlags.O_WRONLY | OpenFlags.O_RDWR);
+		    var canWrite = amask == OpenFlags.O_WRONLY || amask == OpenFlags.O_RDWR;
 		    logger.LogInformation("OPEN {path}", path);
 		    try
 		    {
@@ -611,12 +613,21 @@ namespace Beyond
 		            key = crypto?.ExtractKey(file).Result;
 		        if (file.Block.Data.File == null)
 		            file.Block.Data.File = new FileIndex();
-		        openedFiles.TryAdd(path, new OpenedHandle
+		        var ofh = new OpenedHandle
 		            {
 		                openCount = 1,
 		                fileBlock = file,
 		                key = key,
-		            });
+		            };
+		        if (canWrite)
+		        {
+		            // do a write check now, otherwise errors
+		            // will happen at close() time which is too late
+		            err = FlushFile(ofh);
+		            if (err != 0)
+		                return err;
+		        }
+		        openedFiles.TryAdd(path, ofh);
 		        logger.LogInformation("File block: {file}", file);
 		        logger.LogInformation("Open success");
 		        return 0;
