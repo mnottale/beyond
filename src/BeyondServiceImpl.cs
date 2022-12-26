@@ -27,6 +27,7 @@ namespace Beyond
         public static int replicationFactor;
         public static string rootPath;
         public static int port;
+        public static string AdvertiseAddress;
 
         public static Crypto crypto;
         public static Storage storage;
@@ -198,7 +199,7 @@ namespace Beyond
                     var serialized = State.self.Id.ToByteArray();
                     File.WriteAllBytes(State.rootPath + "/identity", serialized);
                 }
-                State.self.Addresses.Add("localhost");
+                State.self.Addresses.Add(State.AdvertiseAddress);
                 State.self.Port = State.port;
             }
         }

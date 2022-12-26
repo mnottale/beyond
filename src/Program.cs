@@ -3,6 +3,8 @@ using Grpc.Core;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
+using System.Net.NetworkInformation;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -14,6 +16,7 @@ using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Hosting;
 
 namespace Beyond
@@ -28,6 +31,10 @@ namespace Beyond
         public string Mount { get; }
         [Option("--serve")]
         public string Serve { get; }
+        [Option("--listen")]
+        public string Listen {get; }
+        [Option("--advertise-address")]
+        public string AdvertiseAddress {get; }
         [Option("--evict")]
         public string Evict { get; }
         [Option("--heal")]
@@ -210,11 +217,41 @@ namespace Beyond
                 State.rootPath = Serve;
                 State.port = Port;
                 State.crypto = crypto;
+                var aa = AdvertiseAddress;
+                if (string.IsNullOrEmpty(aa) || aa.Contains("/"))
+                { // netmask was given or nothing, pick ip
+                    IPNetwork filter = null;
+                    IPAddress.TryParse("127.0.0.1", out var lh);
+                    IPNetwork loopback = new IPNetwork(lh, 8);
+                    if (!string.IsNullOrEmpty(aa))
+                    {
+                        var nm = aa.Split('/');
+                        IPAddress.TryParse(nm[0], out var ia);
+                        filter = new IPNetwork(ia, int.Parse(nm[1]));
+                    }
+                    foreach (NetworkInterface netInterface in NetworkInterface.GetAllNetworkInterfaces())
+                    {
+                        IPInterfaceProperties ipProps = netInterface.GetIPProperties();
+                        foreach (UnicastIPAddressInformation addr in ipProps.UnicastAddresses)
+                        {
+                            if (loopback.Contains(addr.Address))
+                                continue;
+                            if (filter != null && !filter.Contains(addr.Address))
+                                continue;
+                            // take it
+                            aa = addr.Address.ToString();
+                            break;
+                        }
+                    }
+                    logger.LogInformation("Will advertise on {address}", aa);
+                }
+                State.AdvertiseAddress = aa;
                 State.backend = new BeyondServiceImpl(Logger.loggerFactory.CreateLogger<BeyondServiceImpl>());
                 //var client = new BeyondClientImpl();
                 var builder = WebApplication.CreateBuilder();
                 builder.Services.AddGrpc();
-                builder.WebHost.UseUrls($"http://localhost:{Port}");
+                var def = ":";
+                builder.WebHost.UseUrls($"http://{Listen ?? def}:{Port}");
                 builder.WebHost.ConfigureKestrel((options) =>
                     {
                         // trying to use Http1AndHttp2 causes http2 connections to fail with invalid protocol error

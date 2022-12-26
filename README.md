@@ -19,7 +19,13 @@ Then `dotnet build` in `src`.
 ## How to run it?
 
 Launch storage nodes with `beyond --serve /path/to/storage --port 20003 --peers localhost:20001 --replication 3`.
-First started node has no `--peer`, each subsequent node need one random peer to be given.
+First started node has no `--peer`, each subsequent node need one other peer to be given.
+
+By default a node will advertise its first non-loopback address to the others.
+Use `--advertise-address` passing an explicit IP or a netmask to search to force a different IP address.
+
+By default a node will listen on all network interfaces, use `--listen <ip>` to override.
+
 
 Launch mount with `beyond --mount /mount/point --replication 3 --peers http://localhost:20001 --fs-name myname`.
 On first launch add `--create`. Never pass it again or it will destroy everything.
