@@ -122,6 +122,7 @@ message BlockData {
   string mode = 4;
   KeyAliasList aliases = 5;
   GroupKeyList groupKeys = 6; // priv keys
+  KeyHashList admins = 7;
 }
 
 message SignedData {

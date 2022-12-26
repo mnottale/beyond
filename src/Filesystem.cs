@@ -36,16 +36,32 @@ namespace Beyond
         private uint permUid = 0;
         private uint permGid = 0;
         private Crypto crypto = null;
-        public FileSystem(BeyondClient.BeyondClientClient client, uint uid=0, uint gid=0, Crypto c = null)
+        public FileSystem(BeyondClient.BeyondClientClient client, string fsName = null, uint uid=0, uint gid=0, Crypto c = null)
         {
             logger = Logger.loggerFactory.CreateLogger<BeyondServiceImpl>();
             this.client = client;
             permUid = uid;
             permGid = gid;
             this.crypto = c;
+            if (fsName != null)
+                SetFilesystem(fsName);
             //GetRoot(); // ping
             if (crypto != null)
+            {
                 crypto.GetKeyBlock = async k => await client.QueryAsync(k);
+                try
+                {
+                    var root = GetRoot();
+                    if (root.Block.Data?.Admins != null)
+                    {
+                        crypto.SetAdmins(root.Block.Data.Admins.KeyHashes);
+                    }
+                }
+                catch (Exception e)
+                {
+                    logger.LogInformation(e, "Cannot fetch admin keys");
+                }
+            }
         }
         public void MkFS()
         {
@@ -79,7 +95,7 @@ namespace Beyond
                 client.Insert(root);
             }
         }
-        public void SetFilesystem(string name)
+        private void SetFilesystem(string name)
         {
             byte[] hashValue = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(name));
             rootAddress = hashValue;
@@ -1032,7 +1048,35 @@ namespace Beyond
 		                file.Block.Writers.KeyHashes.Remove(exists);
 		                return Update(file);
 		            }
-		    
+		            if (name == "beyond.addadmin")
+		            {
+		                var keySpec = System.Text.Encoding.UTF8.GetString(value);
+		                var keyAddr = keySpec.Length == 64 ? Utils.StringKey(keySpec) : GetAlias(keySpec);
+		                if (keyAddr == null)
+		                    return Errno.EIO;
+		                var pkb = client.Query(keyAddr);
+		                if (file.Block.Data.Admins == null)
+		                    file.Block.Data.Admins = new KeyHashList();
+		                var exists = file.Block.Data.Admins.KeyHashes.Where(x=>x.Equals(keyAddr)).FirstOrDefault();
+		                if (exists != null)
+		                    return 0;
+		                file.Block.Data.Admins.KeyHashes.Add(keyAddr);
+		                return Update(file);
+		            }
+		            if (name == "beyond.removeadmin")
+		            {
+		                var keySpec = System.Text.Encoding.UTF8.GetString(value);
+		                var keyAddr = keySpec.Length == 64 ? Utils.StringKey(keySpec) : GetAlias(keySpec);
+		                if (keyAddr == null)
+		                    return Errno.EIO;  
+		                if (file.Block.Data.Admins == null)
+		                    return Errno.ENOENT;
+		                var exists = file.Block.Data.Admins.KeyHashes.Where(x=>x.Equals(keyAddr)).FirstOrDefault();
+		                if (exists == null)
+		                    return Errno.ENOENT;
+		                file.Block.Data.Admins.KeyHashes.Remove(exists);
+		                return Update(file);
+		            }
 		            if (name == "beyond.addalias")
 		            {
 		                var ak = System.Text.Encoding.UTF8.GetString(value).Split(':');

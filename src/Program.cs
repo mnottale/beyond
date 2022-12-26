@@ -148,9 +148,7 @@ namespace Beyond
                 var bclient = new BeyondClient.BeyondClientClient(channel);
                 if (!string.IsNullOrEmpty(Mount))
                 {
-                    var fs = new FileSystem(bclient, Uid, Gid, crypto);
-                    if (!string.IsNullOrEmpty(FsName))
-                        fs.SetFilesystem(FsName);
+                    var fs = new FileSystem(bclient, FsName, Uid, Gid, crypto);
                     if (!string.IsNullOrEmpty(MountKey))
                     { // always try to insert key
                         var toput = crypto.ExportOwnerPublicKey();

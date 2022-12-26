@@ -23,6 +23,7 @@ public class Crypto
 {
     private AsymmetricAlgorithm _owner;
     private Key _ownerSig;
+    private List<Key> _admins = new();
     private Dictionary<Key, AsymmetricAlgorithm> _keys = new();
     private ILogger _logger;
 
@@ -31,6 +32,11 @@ public class Crypto
     public Crypto()
     {
         _logger = Logger.loggerFactory.CreateLogger<Crypto>();
+    }
+    public void SetAdmins(IEnumerable<Key> adms)
+    {
+        _admins.Clear();
+        _admins.AddRange(adms);
     }
     public void SetOwner(byte[] encryptedKey, string passphrase)
     {
@@ -165,6 +171,33 @@ public class Crypto
         }
         else if (bak.Block.Owner == null)
             throw new System.Exception("Owner not set, but key set");
+        if (bak.Block.Readers == null)
+        {
+            bak.Block.Readers = new EncryptionKeyList();
+            bc |= BlockChange.Readers;
+        }
+        if (_admins.Any())
+        {
+            foreach (var ak in _admins)
+            {
+                if (ak.Equals(_ownerSig))
+                    continue;
+                var exists = bak.Block.Readers.EncryptionKeys.Where(x=>x.Recipient.Equals(ak)).FirstOrDefault();
+                if (exists == null)
+                {
+                    bc |= BlockChange.Readers;
+                    bak.Block.Readers.EncryptionKeys.Add(new EncryptionKey { Recipient = ak});
+                }
+                if (bak.Block.Writers == null)
+                    bak.Block.Writers = new KeyHashList();
+                var ew = bak.Block.Writers.KeyHashes.Where(x=>x.Equals(ak)).FirstOrDefault();
+                if (ew == null)
+                {
+                    bc |= BlockChange.Writers;
+                    bak.Block.Writers.KeyHashes.Add(ak);
+                }
+            }
+        }
         if ((bc & BlockChange.GroupRemove) != 0)
         {
             if (bak.Block.Data.GroupKeys == null)
@@ -214,11 +247,6 @@ public class Crypto
             bak.Block.WritersSignature = new Signature();
             bak.Block.WritersSignature.KeyHash = _ownerSig;
             bak.Block.WritersSignature.Signature_ = Google.Protobuf.ByteString.CopyFrom(sig);
-        }
-        if (bak.Block.Readers == null)
-        {
-            bak.Block.Readers = new EncryptionKeyList();
-            bc |= BlockChange.Readers;
         }
         if ((bc & BlockChange.Readers) != 0)
         {

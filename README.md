@@ -112,6 +112,12 @@ The members of a group are its readers. To add a user key to the group, simply r
 the `beyond:something` is a special file at the root that allows pointing to a specific
 block by its alias or address.
 
+Furthermore as an admin you might want to keep some control over the whole content.
+This is achieved with admin keys. Those keys once registered are added automatically
+by the filesystem layer to the reader and writers of all blocks created.
+
+    xattr -w beyond.addadmin <userOrKeyHash> mountpoint/
+
 ## Future features and goals
 
   - Caching layer for faster usage
