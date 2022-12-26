@@ -1172,6 +1172,28 @@ namespace Beyond
 		                result = String.Join('\n', file.Block.Owners.Owners.Select(x=>Utils.KeyString(x)));
 		            else if (name == "beyond.dump")
 		                result = file.ToString();
+		            else if (name == "beyond.info")
+		            {
+		                var root = GetRoot();
+		                Func<Key, string> aliasOrKey = k =>
+		                {
+		                    if (root.Block.Data.Aliases == null)
+		                        return Utils.KeyString(k);
+		                    var hit = root.Block.Data.Aliases.KeyAliases.Where(x=>x.KeyHash.Equals(k)).FirstOrDefault();
+		                    if (hit == null)
+		                        return Utils.KeyString(k);
+		                    else
+		                        return hit.Alias;
+		                };
+		                var kown = aliasOrKey(file.Block.Owner);
+		                var kr = file.Block.Readers.EncryptionKeys.Select(r=>aliasOrKey(r.Recipient));
+		                var kw = file.Block.Writers?.KeyHashes.Select(x=>aliasOrKey(x)).ToList() ?? new List<string>();
+		                result = "address " + Utils.KeyString(file.Key) + "\n"
+		                    + "readers " + String.Join(" ", kr) + "\n"
+		                    + "writers " + String.Join(" ", kw) + "\n"
+		                    + "inheritRead " + file.Block.InheritReaders + "\n"
+		                    + "inheritWrite " + file.Block.InheritWriters + "\n";
+		            }
 		            var rb = System.Text.Encoding.UTF8.GetBytes(result);
 		            var l = Math.Min(value.Length, rb.Length);
 		            Array.Copy(rb, value, l);
