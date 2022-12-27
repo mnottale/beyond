@@ -46,13 +46,13 @@ public class Crypto
         var pub = aa.ExportRSAPublicKey();
         _ownerSig = Utils.Checksum(pub);
     }
-    public static byte[] MakeAsymmetricKey(string passphrase)
+    public static (byte[], string) MakeAsymmetricKey(string passphrase)
     {
         var k = new RSACryptoServiceProvider(2048);
-        return k.ExportEncryptedPkcs8PrivateKey(passphrase,
+        return (k.ExportEncryptedPkcs8PrivateKey(passphrase,
             new PbeParameters(PbeEncryptionAlgorithm.Aes256Cbc,
                 HashAlgorithmName.SHA256,
-                1000)); // no idea what I'm doing, this is dog
+                1000)), Utils.KeyString(Utils.Checksum(k.ExportRSAPublicKey()))); // no idea what I'm doing, this is dog
     }
     public BlockAndKey ExportOwnerPublicKey()
     {

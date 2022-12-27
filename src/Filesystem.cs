@@ -930,6 +930,32 @@ namespace Beyond
 		}
 		protected override Errno OnSynchronizeHandle (string path, OpenedPathInfo info, bool onlyUserData)
 		{
+		    logger.LogInformation("SYNC {path}", path);
+		    if (openedFiles.TryGetValue(path, out var oh))
+		    {
+		        logger.LogInformation("sync open count: {open}", oh.openCount);
+		        try
+		        {
+		            foreach (var kv in oh.chunks)
+		            {
+		                if (kv.Value.dirty)
+		                {
+		                    FlushChunk(oh, (int)kv.Key);
+		                    kv.Value.dirty = false;
+		                }
+		            }
+		            if (oh.dirty)
+		            {
+		                FlushFile(oh);
+		                oh.dirty = false;
+		            }
+		        }
+		        catch (Exception e)
+		        {
+		            logger.LogError(e, "Exception while flushing");
+		            throw;
+		        }
+		    }
 		    return 0;
 		}
 		private Key GetAlias(string als)

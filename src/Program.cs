@@ -105,8 +105,9 @@ namespace Beyond
                     Console.WriteLine("File exists, refusing to overwrite");
                     return;
                 }
-                var k = Crypto.MakeAsymmetricKey(passphrase);
+                var (k, sig) = Crypto.MakeAsymmetricKey(passphrase);
                 File.WriteAllBytes(target, k);
+                File.WriteAllText(target+"sig", sig);
                 Console.WriteLine("Key saved at " + target);
                 return;
             }
