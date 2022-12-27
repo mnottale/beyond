@@ -500,6 +500,12 @@ namespace Beyond
                     tasks.Add(p.client.WriteAndReleaseAsync(bal).ResponseAsync);
             }
             await Task.WhenAll(tasks);
+            // fixme this is nasty if we have partial success
+            foreach (var t in tasks)
+            {
+                if (t.Result.Code != Error.Types.ErrorCode.Ok)
+                    return t.Result;
+            }
             return Utils.ErrorFromCode(Error.Types.ErrorCode.Ok);
         }
         public Task Connect(string host, int port)

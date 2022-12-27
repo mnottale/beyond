@@ -49,7 +49,30 @@ class TestBasic(unittest.TestCase):
         time.sleep(1)
         with self.assertRaises(Exception):
             get(opj(self.bob, 'fileb'))
-        
+    def test_grant_revoke_write_file(self):
+        delay = 0.3
+        fn = 'filec'
+        fna = opj(self.alice, fn)
+        fnb = opj(self.bob, fn)
+        data = 'sample data'
+        put(fna, data)
+        time.sleep(delay)
+        os.setxattr(fna, 'beyond.addreader', 'bob'.encode())
+        time.sleep(delay)
+        self.assertEqual(data, get(fnb))
+        with self.assertRaises(Exception):
+            append(fnb, data)
+        os.setxattr(fna, 'beyond.addwriter', 'bob'.encode())
+        time.sleep(delay)
+        append(fnb, data)
+        data = data + data
+        time.sleep(delay)
+        self.assertEqual(data, get(fnb))
+        self.assertEqual(data, get(fna))
+        os.setxattr(fna, 'beyond.removewriter', 'bob'.encode())
+        time.sleep(delay)
+        with self.assertRaises(Exception):
+            append(fnb, data)
 me = os.path.dirname(os.path.realpath(__file__))
 class Beyond:
     def __init__(self, nodes=3, replication_factor=3, mounts=2):

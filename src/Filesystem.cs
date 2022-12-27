@@ -567,7 +567,7 @@ namespace Beyond
 		{
 		    var amask = info.OpenFlags  & (OpenFlags.O_RDONLY | OpenFlags.O_WRONLY | OpenFlags.O_RDWR);
 		    var canWrite = amask == OpenFlags.O_WRONLY || amask == OpenFlags.O_RDWR;
-		    logger.LogInformation("OPEN {path}", path);
+		    logger.LogInformation("OPEN {path} write={canwrite}", path, canWrite);
 		    try
 		    {
 		        if (openedFiles.TryGetValue(path, out var oh))
