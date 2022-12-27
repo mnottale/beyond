@@ -459,6 +459,12 @@ public class Crypto
                     target.Block.Writers.KeyHashes.Add(w);
                 }
             }
+            if (!parent.Block.Owner.Equals(target.Block.Owner))
+            {
+                if (target.Block.Writers == null)
+                    target.Block.Writers = new KeyHashList();
+                target.Block.Writers.KeyHashes.Add(parent.Block.Owner);
+            }
         }
     }
 }

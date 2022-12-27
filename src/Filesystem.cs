@@ -616,6 +616,9 @@ namespace Beyond
 		                client.Insert(fseal);
 		                file.Key = fseal.Key;
 		                file.Block.Owner = fseal.Block.Owner;
+		                file.Block.Readers = fseal.Block.Readers;
+		                file.Block.WritersSignature = fseal.Block.WritersSignature;
+		                file.Block.ReadersSignature = fseal.Block.ReadersSignature;
 		            }
 		            else
 		                client.Insert(file);

@@ -21,6 +21,7 @@ def get(fn):
         return f.read()
 
 class TestBasic(unittest.TestCase):
+    # Test writing rule: it is forbidden to touch root dir permissions
     def __init__(self, *args):
         super().__init__(*args)
         self.beyond = b
@@ -73,6 +74,36 @@ class TestBasic(unittest.TestCase):
         time.sleep(delay)
         with self.assertRaises(Exception):
             append(fnb, data)
+    def test_inheritance(self):
+        roota = opj(self.alice, 'dira')
+        rootb = opj(self.bob, 'dira')
+        delay = 0.3
+        data = 'some data'
+        os.mkdir(roota)
+        os.setxattr(roota, 'beyond.addreader', 'bob'.encode())
+        os.setxattr(roota, 'beyond.addwriter', 'bob'.encode())
+        os.setxattr(roota, 'beyond.inherit', 'rw'.encode())
+        time.sleep(delay)
+        put(opj(roota, 'filea'), data)
+        time.sleep(delay)
+        self.assertEqual(data, get(opj(rootb, 'filea')))
+        os.mkdir(opj(roota, 'dir'))
+        put(opj(roota, 'dir', 'filea'), data)
+        time.sleep(delay)
+        self.assertEqual(data, get(opj(rootb, 'dir', 'filea')))
+        put(opj(rootb, 'dir', 'fileb'), data)
+        time.sleep(delay)
+        self.assertEqual(data, get(opj(roota, 'dir', 'fileb')))
+        
+        os.mkdir(opj(rootb, 'dirb'))
+        time.sleep(delay)
+        put(opj(roota, 'dirb', 'filea'), data)
+        time.sleep(delay)
+        self.assertEqual(data, get(opj(rootb, 'dirb', 'filea')))
+        put(opj(rootb, 'dirb', 'fileb'), data)
+        time.sleep(delay)
+        self.assertEqual(data, get(opj(roota, 'dirb', 'fileb')))
+
 me = os.path.dirname(os.path.realpath(__file__))
 class Beyond:
     def __init__(self, nodes=3, replication_factor=3, mounts=2):
