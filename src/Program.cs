@@ -61,6 +61,12 @@ namespace Beyond
         public uint Uid { get; }
         [Option("--gid")]
         public uint Gid { get; }
+        [Option("--immutable-cache-size")]
+        public ulong ImmutableCacheSize { get; }
+        [Option("--mutable-cache-duration")]
+        public ulong MutableCacheDuration { get; }
+        [Option("--passphrase")]
+        public string Passphrase { get; }
         static void Main(string[] args) => CommandLineApplication.Execute<Program>(args);
         
         public string GetPassword()
@@ -82,9 +88,9 @@ namespace Beyond
             if (!string.IsNullOrEmpty(CreateKey))
             {
                 Console.WriteLine("Please enter a passhrase for your key:");
-                var passphrase = GetPassword();
+                var passphrase = Passphrase ?? GetPassword();
                 Console.WriteLine("Please retype the passhrase for confirmation:");
-                var confirm = GetPassword();
+                var confirm = Passphrase ?? GetPassword();
                 if (passphrase != confirm)
                 {
                     Console.WriteLine("Mismatch, exiting...(looser)");
@@ -115,7 +121,7 @@ namespace Beyond
                     var target = beyond + "/"+MountKey+".key";
                     var data = File.ReadAllBytes(target);
                     Console.WriteLine("Enter passphrase for " + target);
-                    var passphrase = GetPassword();
+                    var passphrase = Passphrase ?? GetPassword();
                     crypto.SetOwner(data, passphrase);
                 }
             }
@@ -155,7 +161,7 @@ namespace Beyond
                 var bclient = new BeyondClient.BeyondClientClient(channel);
                 if (!string.IsNullOrEmpty(Mount))
                 {
-                    var fs = new FileSystem(bclient, FsName, Uid, Gid, crypto);
+                    var fs = new FileSystem(bclient, FsName, Uid, Gid, crypto, ImmutableCacheSize, MutableCacheDuration);
                     if (!string.IsNullOrEmpty(MountKey))
                     { // always try to insert key
                         var toput = crypto.ExportOwnerPublicKey();

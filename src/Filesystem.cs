@@ -36,13 +36,15 @@ namespace Beyond
         private uint permUid = 0;
         private uint permGid = 0;
         private Crypto crypto = null;
-        public FileSystem(BeyondClient.BeyondClientClient client, string fsName = null, uint uid=0, uint gid=0, Crypto c = null)
+        private Cache cache = null;
+        public FileSystem(BeyondClient.BeyondClientClient client, string fsName = null, uint uid=0, uint gid=0, Crypto c = null, ulong immutableCacheSize = 0, ulong mutableCacheDuration = 0)
         {
             logger = Logger.loggerFactory.CreateLogger<BeyondServiceImpl>();
             this.client = client;
             permUid = uid;
             permGid = gid;
             this.crypto = c;
+            this.cache = new Cache(client, immutableCacheSize, mutableCacheDuration);
             if (fsName != null)
                 SetFilesystem(fsName);
             //GetRoot(); // ping
@@ -110,12 +112,12 @@ namespace Beyond
         {
             BlockAndKey res = new BlockAndKey();
             res.Key = RootAddress();
-            res.Block = client.Query(res.Key);
+            res.Block = cache.GetMutable(res.Key);
             if (crypto == null)
                 return res;
             var rp = new BlockAndKey();
             rp.Key = res.Block.Pointer;
-            rp.Block = client.Query(rp.Key);
+            rp.Block = cache.GetMutable(rp.Key);
             crypto.UnsealMutable(rp).Wait();
             return rp;
         }
@@ -139,7 +141,7 @@ namespace Beyond
                 {
                     if (ent.Name == components[i])
                     {
-                        var blk = client.Query(ent.Address);
+                        var blk = cache.GetMutable(ent.Address);
                         current.Key = ent.Address;
                         current.Block = blk;
                         if (crypto != null)
@@ -203,7 +205,7 @@ namespace Beyond
 		                DirectoryEntry.Types.EntryType.Directory =>  FilePermissions.S_IFDIR,
 		                DirectoryEntry.Types.EntryType.Symlink =>  FilePermissions.S_IFLNK,
 		            };
-		            var rawblock = client.Query(hit.Address);
+		            var rawblock = cache.GetMutable(hit.Address);
 		            block.Key = hit.Address;
 		            block.Block = rawblock;
 		            if (crypto != null)
@@ -290,7 +292,7 @@ namespace Beyond
 		            var aes = crypto.ExtractKey(block).Result; 
 		            crypto.SealMutable(block, BlockChange.Data, aes).Wait();
 		        }
-		        var res = client.TransactionalUpdate(block);
+		        var res = cache.UpdateMutable(block);
 		        if (res.Code == Error.Types.ErrorCode.Ok)
 		            break;
 		        if (res.Code != Error.Types.ErrorCode.AlreadyLocked
@@ -471,49 +473,57 @@ namespace Beyond
 		protected override Errno OnRenamePath (string from, string to)
 		{
 		    logger.LogInformation("MV {from} {to}", from, to);
-		    BlockAndKey todir = null;
-		    BlockAndKey fromdir = null;
-		    var compsfrom = from.Split('/');
-		    var fileNameFrom = compsfrom[compsfrom.Length-1];
-		    var compsto = to.Split('/');
-		    var fileNameTo = compsto[compsto.Length-1];
-		    var err = Get(from, out fromdir, parent:true);
-		    if (err != 0)
-		        return err;
-		    err = Get(to, out todir, parent:true);
-		    if (err != 0)
-		        return err;
-		    var exists = todir.Block.Data.Directory.Entries.Where(e=>e.Name == fileNameTo).FirstOrDefault();
-		    if (exists != null)
+		    try
 		    {
-		        if (exists.EntryType == DirectoryEntry.Types.EntryType.Directory)
-		            return Errno.EISDIR;
-		        err = OnRemoveFile(to);
+		        BlockAndKey todir = null;
+		        BlockAndKey fromdir = null;
+		        var compsfrom = from.Split('/');
+		        var fileNameFrom = compsfrom[compsfrom.Length-1];
+		        var compsto = to.Split('/');
+		        var fileNameTo = compsto[compsto.Length-1];
+		        var err = Get(from, out fromdir, parent:true);
 		        if (err != 0)
 		            return err;
+		        err = Get(to, out todir, parent:true);
+		        if (err != 0)
+		            return err;
+		        var exists = todir.Block.Data.Directory.Entries.Where(e=>e.Name == fileNameTo).FirstOrDefault();
+		        if (exists != null)
+		        {
+		            if (exists.EntryType == DirectoryEntry.Types.EntryType.Directory)
+		                return Errno.EISDIR;
+		            err = OnRemoveFile(to);
+		            if (err != 0)
+		                return err;
+		        }
+		        var de = fromdir.Block.Data.Directory.Entries.Where(e=>e.Name == fileNameFrom).FirstOrDefault();
+		        if (de == null)
+		            return Errno.ENOENT;
+		        var det = new DirectoryEntry();
+		        det.EntryType = de.EntryType;
+		        det.Name = fileNameTo;
+		        det.Address = de.Address;
+		        err = UpdateBlock(to, true, todir, b => {
+		                b.Block.Version = b.Block.Version + 1;
+		                b.Block.Data.Directory.Entries.Add(det);
+		        });
+		        if (err != 0)
+		            return err;
+		        err = UpdateBlock(from, true, fromdir, b => {
+		                b.Block.Version = b.Block.Version + 1;
+		                var deb = b.Block.Data.Directory.Entries.Where(e=>e.Name == fileNameFrom).FirstOrDefault();
+		                if (deb != null)
+		                    b.Block.Data.Directory.Entries.Remove(deb);
+		        });
+		        if (err != 0)
+		            return err;
+		        return 0;
 		    }
-		    var de = fromdir.Block.Data.Directory.Entries.Where(e=>e.Name == fileNameFrom).FirstOrDefault();
-		    if (de == null)
-		        return Errno.ENOENT;
-		    var det = new DirectoryEntry();
-		    det.EntryType = de.EntryType;
-		    det.Name = fileNameTo;
-		    det.Address = de.Address;
-		    err = UpdateBlock(to, true, todir, b => {
-		            b.Block.Version = b.Block.Version + 1;
-		            b.Block.Data.Directory.Entries.Add(det);
-		    });
-		    if (err != 0)
-		        return err;
-		    err = UpdateBlock(from, true, fromdir, b => {
-		            b.Block.Version = b.Block.Version + 1;
-		            var deb = b.Block.Data.Directory.Entries.Where(e=>e.Name == fileNameFrom).FirstOrDefault();
-		            if (deb != null)
-		                b.Block.Data.Directory.Entries.Remove(deb);
-		    });
-		    if (err != 0)
-		        return err;
-		    return 0;
+		    catch(Exception e)
+		    {
+		        logger.LogError(e, "Exception in MV");
+		        throw;
+		    }
 		}
 		protected override Errno OnCreateHardLink (string from, string to)
 		{
@@ -662,7 +672,7 @@ namespace Beyond
 		        if (chunkIndex >= (ulong)oh.fileBlock.Block.Data.File.Blocks.Count)
 		            return 0;
 		        var baddr = oh.fileBlock.Block.Data.File.Blocks[(int)chunkIndex].Address;
-		        var block = client.Query(baddr);
+		        var block = cache.GetImmutable(baddr);
 		        if (crypto != null)
 		        {
 		            var bak = new BlockAndKey();
@@ -748,7 +758,7 @@ namespace Beyond
 		        else
 		        {
 		            var baddr = oh.fileBlock.Block.Data.File.Blocks[(int)chunkIndex].Address;
-		            var bl = client.Query(baddr);
+		            var bl = cache.GetImmutable(baddr);
 		            if (crypto != null)
 		            {
 		                 var bak = new BlockAndKey();
@@ -827,7 +837,7 @@ namespace Beyond
 		            fbc.Block = fbc.Block.Clone();
 		            crypto.SealMutable(fbc, BlockChange.Data, oh.key).Wait();
 		        }
-		        var res = client.TransactionalUpdate(fbc);
+		        var res = cache.UpdateMutable(fbc);
 		        if (res.Code == Error.Types.ErrorCode.Ok)
 		            break;
 		        if (res.Code != Error.Types.ErrorCode.AlreadyLocked
@@ -835,7 +845,7 @@ namespace Beyond
 		        && res.Code !=  Error.Types.ErrorCode.Outdated)
 		          return Errno.EIO;
 		        logger.LogInformation("Flush retry from {version}", oh.fileBlock.Block.Version);
-		        var current = client.Query(oh.fileBlock.Key);
+		        var current = cache.GetMutable(oh.fileBlock.Key, true);
 		        oh.fileBlock.Block.Version = current.Version + 1;
 		    }
 		    return 0;
@@ -945,7 +955,7 @@ namespace Beyond
 		            bc |= BlockChange.GroupRemove;
 		        crypto.SealMutable(file, bc, bk).Wait();
 		    }
-		    var res = client.TransactionalUpdate(file);
+		    var res = cache.UpdateMutable(file);
 		    if (res.Code != Error.Types.ErrorCode.Ok)
 		    {
 		        logger.LogWarning("Update failure with {code}", res.Code);
