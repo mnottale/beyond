@@ -103,6 +103,26 @@ class TestBasic(unittest.TestCase):
         put(opj(rootb, 'dirb', 'fileb'), data)
         time.sleep(delay)
         self.assertEqual(data, get(opj(roota, 'dirb', 'fileb')))
+    def test_parallel_dir_write(self):
+        roota = opj(self.alice, 'dirb')
+        rootb = opj(self.bob, 'dirb')
+        delay=0.3
+        os.mkdir(roota)
+        os.setxattr(roota, 'beyond.addreader', 'bob'.encode())
+        os.setxattr(roota, 'beyond.addwriter', 'bob'.encode())
+        os.setxattr(roota, 'beyond.inherit', 'rw'.encode())
+        time.sleep(delay)
+        script='for i in $(seq 1 1000) ; do echo foo > {}/{}$i;done'
+        scripta=script.format(roota, 'a')
+        scriptb=script.format(rootb, 'b')
+        handlea = subprocess.Popen(['bash', '-c', scripta])
+        handleb = subprocess.Popen(['bash', '-c', scriptb])
+        handlea.wait()
+        handleb.wait()
+        self.assertEqual(2000, len(os.listdir(roota)))
+        self.assertEqual(2000, len(os.listdir(rootb)))
+        self.assertEqual('foo\n', get(opj(roota, 'a47')))
+        self.assertEqual('foo\n', get(opj(rootb, 'b47')))
 
 me = os.path.dirname(os.path.realpath(__file__))
 class Beyond:

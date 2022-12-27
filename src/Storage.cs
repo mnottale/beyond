@@ -1,12 +1,27 @@
 using System;
 using System.IO;
 using System.Collections.Generic;
+using System.Threading;
 
 namespace Beyond
 {
     public class Storage
     {
+        private class SSLock: IDisposable
+        {
+            private readonly SemaphoreSlim _sem;
+            public SSLock(SemaphoreSlim sem)
+            {
+                _sem = sem;
+                sem.Wait();
+            }
+            public void Dispose()
+            {
+                _sem.Release();
+            }
+        }
         private string root;
+        private SemaphoreSlim sem = new SemaphoreSlim(1, 1);
         public Storage(string root)
         {
             this.root = root;
@@ -46,11 +61,13 @@ namespace Beyond
         public void Put(Key key, byte[] value)
         {
             var path = PathOf(key);
+            using var lk = new SSLock(sem);
             File.WriteAllBytes(path, value);
         }
         public byte[] Get(Key key)
         {
             var path = PathOf(key);
+            using var lk = new SSLock(sem);
             return File.ReadAllBytes(path);
         }
         public bool Has(Key key)
