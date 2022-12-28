@@ -945,6 +945,7 @@ namespace Beyond
 		        logger.LogInformation("Flush retry from {version}", oh.fileBlock.Block.Version);
 		        var current = cache.GetMutable(oh.fileBlock.Key, true);
 		        oh.fileBlock.Block.Version = current.Version + 1;
+		        oh.fileBlock.Block.Owners = current.Owners;
 		    }
 		    return 0;
 		}
@@ -1304,6 +1305,8 @@ namespace Beyond
 		                result = Utils.KeyString(file.Key);
 		            else if (name == "beyond.owners")
 		                result = String.Join('\n', file.Block.Owners.Owners.Select(x=>Utils.KeyString(x)));
+		            else if (name == "beyond.ownersstate")
+		                result = file.Block.Owners.UptodateMask.ToString();
 		            else if (name == "beyond.dump")
 		                result = file.ToString();
 		            else if (name == "beyond.info")

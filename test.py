@@ -19,7 +19,10 @@ def append(fn, data):
 def get(fn):
     with open(fn, 'r') as f:
         return f.read()
-
+def getxattr(pth, name):
+    res = subprocess.run(['/tmp/gx', pth, name], capture_output=True)
+    return res.stdout
+    
 class TestBasic(unittest.TestCase):
     # Test writing rule: it is forbidden to touch root dir permissions
     def __init__(self, *args):
@@ -169,14 +172,34 @@ class TestBasic(unittest.TestCase):
         self.assertEqual(2000, len(os.listdir(rootb)))
         self.assertEqual('foo\n', get(opj(roota, 'a47')))
         self.assertEqual('foo\n', get(opj(rootb, 'b47')))
-
+    def test_temp_downtime(self):
+        fn = opj(self.alice, 'filedt')
+        put(fn, 'data')
+        time.sleep(0.3)
+        msk = int(getxattr(fn, 'beyond.ownersstate').decode('utf-8'))
+        self.assertEqual(7, msk)
+        self.beyond.kill_node(1)
+        time.sleep(1)
+        append(fn, 'datadata')
+        time.sleep(0.3)
+        msk = int(getxattr(fn, 'beyond.ownersstate').decode('utf-8'))
+        self.assertIn(msk, [3, 5, 6])
+        self.beyond.restart_node(1)
+        time.sleep(2)
+        append(fn, 'datadata')
+        time.sleep(0.3)
+        msk = int(getxattr(fn, 'beyond.ownersstate').decode('utf-8'))
+        self.assertEqual(7, msk)
+        
 me = os.path.dirname(os.path.realpath(__file__))
 class Beyond:
     def __init__(self, nodes=3, replication_factor=3, mounts=2):
         self.root_handle = tempfile.TemporaryDirectory()
+        self.replication_factor = replication_factor
         self.root = self.root_handle.name
         self.nodes = list()
         port = 20000
+        self.port = port
         for i in range(nodes):
             cmd = ['/usr/lib/dotnet/dotnet6-6.0.110/dotnet','run','--no-build', '--',
                 '--serve', os.path.join(self.root, str(i)),
@@ -217,6 +240,25 @@ class Beyond:
             os.setxattr(self.mount_point(0), 'beyond.addalias', (self.keys[i] + ':' + self.key_sigs[i]).encode())
         if mounts > 1:
             os.setxattr(self.mount_point(0), 'beyond.addreader', self.key_sigs[1].encode())
+    def kill_node(self, i):
+        self.nodes[i][0].terminate()
+        self.nodes[i] = (None, self.nodes[i][1])
+    def restart_node(self, i):
+         cmd = ['/usr/lib/dotnet/dotnet6-6.0.110/dotnet','run','--no-build', '--',
+                '--serve', os.path.join(self.root, str(i)),
+                '--port', str(self.port+i),
+                '--crypt',
+                '--replication', str(self.replication_factor)
+            ]
+         cmd = cmd + ['--peers', 'localhost:{}'.format(self.port)]
+         out = self.nodes[i][1]
+         handle = subprocess.Popen(cmd, cwd=os.path.join(me, 'src'), stdout=out, stderr=out)
+         self.nodes[i] = (handle, out)
+         time.sleep(1)
+    def wipe_node(self, i):
+        # Wipes node key and data, a restart will spawn under a new key
+        shutil.rmtree(os.path.join(self.root, str(i)))
+        os.mkdir(os.path.join(self.root, str(i)))
     def mount_point(self, i=0):
         return os.path.join(self.root, 'mount'+str(i))
     def teardown(self):
@@ -226,7 +268,8 @@ class Beyond:
             self.mounts[i][0].terminate()
             self.mounts[i][1].close()
         for m in self.nodes:
-            m[0].terminate()
+            if m[0] is not None:
+                m[0].terminate()
             m[1].close()
         self.root_handle.cleanup()
 
@@ -234,7 +277,7 @@ if __name__=='__main__':
     b = Beyond()
     print('beyond running at ' + b.root)
     try:
-        if len(sys.argv) == 1:
+        if len(sys.argv) == 1 or sys.argv[1] != 'runonly':
             unittest.main(exit=False)
         while True:
             time.sleep(3600)

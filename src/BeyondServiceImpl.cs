@@ -428,6 +428,8 @@ namespace Beyond
                         peers.Add(hit);
                     else if (pk.Equals(State.self.Id))
                         peers.Add(null);
+                    else
+                        logger.LogInformation("Peer {key} is down", Utils.KeyString(pk));
                 }
             }
             else
@@ -479,16 +481,23 @@ namespace Beyond
             bal.Lock = lk;
             bal.BlockAndKey = bak;
             ulong umsk = 0;
-            ulong bit = 0;
+            ulong bit = 1;
             if (bal.BlockAndKey.Block.Owners != null)
             {
                 foreach (var ownerKey in bal.BlockAndKey.Block.Owners.Owners)
                 {
-                    if (peers.Find(p => 
-                        (p == null && State.self.Id.Equals(ownerKey != null))
-                    || (p != null && p.info.Id.Equals(ownerKey))) != null)
-                        umsk |= bit;
-                    bit <<= 1;
+                    // MEGA TRAP, Find() seems to skip null entries
+                    foreach (var p in peers)
+                    {
+                        if (
+                            (p == null && State.self.Id.Equals(ownerKey))
+                        || (p != null && p.info.Id.Equals(ownerKey)))
+                        {
+                            umsk |= bit;
+                            break;
+                        }
+                    }
+                   bit <<= 1;
                 }
                 bal.BlockAndKey.Block.Owners.UptodateMask = umsk;
             }
