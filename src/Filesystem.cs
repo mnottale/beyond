@@ -549,7 +549,101 @@ namespace Beyond
 		protected override Errno OnTruncateFile (string path, long size)
 		{
 		    logger.LogInformation("TRUNK {path} {size}", path, size);
-		    return Errno.EOPNOTSUPP;
+		    var err = OpenOrCreate(path, false, null, null, OpenFlags.O_RDWR);
+		    if (err != 0)
+		        return err;
+		    if (!openedFiles.TryGetValue(path, out var ofh))
+		        return Errno.EIO;
+		    long fullChunkCount = size / (long)CHUNK_SIZE;
+		    long extraChunkSize = size - fullChunkCount * (long)CHUNK_SIZE;
+		    
+		    var file = ofh.fileBlock.Block.Data.File;
+		    var currentSize = (long)file.Size;
+		    if (size == currentSize)
+		    {
+		        OnReleaseHandle(path, null);
+		        return 0;
+		    }
+		    if (size < currentSize)
+		    {
+		        for (int i = file.Blocks.Count-1;
+		            i >= fullChunkCount + ((extraChunkSize != 0)? 1:0);
+		            i--)
+		        { // shoot chunk
+		            if (crypto == null)
+		                client.Delete(new BlockAndKey {Key=file.Blocks[i].Address});
+		            else
+		                client.Delete(crypto.DeletionRequest(file.Blocks[i].Address, ofh.fileBlock.Key));
+		             file.Blocks.RemoveAt(i);
+		        }
+		        // maybe truncate last chunk
+		        if (extraChunkSize != 0)
+		        {
+		            var baddr = file.Blocks[file.Blocks.Count-1].Address;
+		            var block = cache.GetImmutable(baddr);
+		            var bak = new BlockAndKey();
+		            bak.Key = baddr;
+		            bak.Block = block;
+		            if (crypto != null)
+		            {
+		                crypto.UnsealImmutable(bak, ofh.key);
+		            }
+		            var newData = Google.Protobuf.ByteString.CopyFrom(
+		                block.Raw.ToByteArray(), 0, (int)extraChunkSize);
+		            block.Raw = newData;
+		            if (crypto == null)
+		            {
+		                while (true)
+		                {
+		                    var res = client.TransactionalUpdate(bak);
+		                    if (res.Code == Error.Types.ErrorCode.Ok)
+		                        break;
+		                    if (res.Code != Error.Types.ErrorCode.AlreadyLocked
+		                        && res.Code != Error.Types.ErrorCode.Conflict
+		                    && res.Code !=  Error.Types.ErrorCode.Outdated)
+		                    return Errno.EIO;
+		                    var current = client.Query(bak.Key);
+		                    bak.Block.Version = current.Version + 1;
+		                }
+		            }
+		            else
+		            {
+		                var prevAddr = bak.Key;
+		                crypto.SealImmutable(bak, ofh.key).Wait();
+		                logger.LogInformation("Immutable replace {old} to {new}", prevAddr, bak.Key);
+		                client.Insert(bak);
+		                if (prevAddr != null)
+		                    client.Delete(crypto.DeletionRequest(prevAddr, ofh.fileBlock.Key));
+		                file.Blocks[file.Blocks.Count-1].Address = bak.Key;
+		            }
+		        }
+		        ofh.dirty = true;
+		        err = FlushFile(ofh);
+		        OnReleaseHandle(path, null);
+		        return err;
+		    }
+		    // grow
+		    byte[] big = null;
+		    var bigsz = 1048576;
+		    while (size - currentSize >= bigsz)
+		    {
+		        if (big == null)
+		            big = new byte[bigsz];
+		        err = OnWriteHandle(path, null, big, currentSize, out var bw);
+		        if (err != 0)
+		            return err;
+		        currentSize += bigsz;
+		    }
+		    if (size > currentSize)
+		    {
+		        var buf = new byte[size-currentSize];
+		        err = OnWriteHandle(path, null, buf, currentSize, out var bw);
+		        if (err != 0)
+		            return err;
+		    }
+		    err = FlushFile(ofh);
+		    OnReleaseHandle(path, null);
+		    return err;
 		}
 		protected override Errno OnChangePathTimes (string path, ref Utimbuf buf)
 		{
@@ -563,9 +657,10 @@ namespace Beyond
 		{
 		    return OpenOrCreate(path, false, info);
 		}
-		private Errno OpenOrCreate(string path, bool allowCreation, OpenedPathInfo info, FilePermissions? mode=null)
+		private Errno OpenOrCreate(string path, bool allowCreation, OpenedPathInfo info, FilePermissions? mode=null, OpenFlags? flags = null)
 		{
-		    var amask = info.OpenFlags  & (OpenFlags.O_RDONLY | OpenFlags.O_WRONLY | OpenFlags.O_RDWR);
+		    var fl = info?.OpenFlags ?? flags.Value;
+		    var amask = fl & (OpenFlags.O_RDONLY | OpenFlags.O_WRONLY | OpenFlags.O_RDWR);
 		    var canWrite = amask == OpenFlags.O_WRONLY || amask == OpenFlags.O_RDWR;
 		    logger.LogInformation("OPEN {path} write={canwrite}", path, canWrite);
 		    try

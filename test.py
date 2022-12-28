@@ -27,10 +27,56 @@ class TestBasic(unittest.TestCase):
         self.beyond = b
         self.alice = self.beyond.mount_point(0)
         self.bob = self.beyond.mount_point(1)
+    def test_truncate(self):
+        data = 'sample data'
+        fn = opj(self.alice, 'filec')
+        put(fn, data)
+        time.sleep(0.3)
+        self.assertEqual(data, get(fn))
+        put(fn, data)
+        time.sleep(0.3)
+        self.assertEqual(data, get(fn))
+        data = 'shorter'
+        put(fn, data)
+        time.sleep(0.3)
+        self.assertEqual(data, get(fn))
+        data = 'a bit longer'
+        put(fn, data)
+        time.sleep(0.3)
+        self.assertEqual(data, get(fn))
+        cs = 65536
+        data = 'abc' * cs
+        put(fn, data)
+        time.sleep(0.3)
+        self.assertEqual(data, get(fn))
+        os.truncate(fn, len(data)-1)
+        data = data[0:-1]
+        time.sleep(0.3)
+        self.assertEqual(data, get(fn))
+        os.truncate(fn, cs*2+1)
+        data = data[0:cs*2+1]
+        time.sleep(0.3)
+        self.assertEqual(data, get(fn))
+        os.truncate(fn, cs*2)
+        data = data[0:cs*2]
+        time.sleep(0.3)
+        self.assertEqual(data, get(fn))
+        os.truncate(fn, cs*2-4)
+        data = data[0:cs*2-4]
+        time.sleep(0.3)
+        self.assertEqual(data, get(fn))
+        os.truncate(fn, cs)
+        data = data[0:cs]
+        time.sleep(0.3)
+        self.assertEqual(data, get(fn))
+        os.truncate(fn, 0)
+        data = ''
+        time.sleep(0.3)
+        self.assertEqual(data, get(fn))
     def test_file(self):
         data = 'sample data'
         put(opj(self.alice, 'filea'), data)
-        time.sleep(1)
+        time.sleep(0.3)
         res = get(opj(self.alice, 'filea'))
         self.assertEqual(data, res)
     def test_grant_revoke_read_file(self):
