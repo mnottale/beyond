@@ -124,6 +124,32 @@ by the filesystem layer to the reader and writers of all blocks created.
 
     xattr -w beyond.addadmin <userOrKeyHash> mountpoint/
 
+## What to do if I loose a node permanently?
+
+In the sad sad scenario where a node is gone forever, you need to:
+
+  - Evict the node, removing it from known ownership data everywhere.
+  - Heal the system, rebalancing blocks that were on this node to new places.
+
+To achieve this, first get hold of the node key. It is stored at storage
+root under file named 'identity.sig'. If you didn't write it down, look at
+the 'topology.json' file of any other node, it lists all known node with their
+last known IP address.
+
+Then run:
+
+    beyond --evict <nodeKey> --peer <somePeer> --replication <factor>
+
+Preferably while all other nodes are on line.
+
+Once finished, run:
+
+    beyond --heal --peer <somePeer> --replication <factor>
+
+This command will iterate on all blocks of all storages and rebalance
+under-replicated blocks to new nodes. Obviously run this when the
+number of connected nodes is at least equal to replication factor.
+
 ## Future features and goals
 
   - Caching layer for faster usage

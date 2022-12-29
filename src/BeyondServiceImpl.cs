@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -38,6 +39,24 @@ namespace Beyond
 
         public static BeyondServiceImpl backend;
         public static ILogger logger;
+
+        public static Dictionary<string, string> topology = new();
+
+        public static void TopoCheck(Peer p)
+        {
+            var k = Utils.KeyString(p.Id);
+            var newaddr = p.Addresses[0] + ":" + p.Port.ToString();
+            if (topology.TryGetValue(k, out var oldaddr))
+            {
+                if (oldaddr == newaddr)
+                    return;
+                topology.Remove(k);
+            }
+            topology.Add(k, newaddr);
+            var str = JsonSerializer.Serialize(topology);
+            var topofile = State.rootPath + "/topology.json";
+            File.WriteAllText(topofile, str);
+        }
     }
     public class BeyondClientImpl: BeyondClient.BeyondClientBase
     {
@@ -202,6 +221,12 @@ namespace Beyond
                 }
                 State.self.Addresses.Add(State.AdvertiseAddress);
                 State.self.Port = State.port;
+                var topofile = State.rootPath + "/topology.json";
+                if (File.Exists(topofile))
+                {
+                    var topostr = File.ReadAllText(topofile);
+                    State.topology = JsonSerializer.Deserialize<Dictionary<string, string>>(topostr);
+                }
             }
         }
         private async Task<List<BPeer>> LocatePeers(Key key)
@@ -577,6 +602,7 @@ namespace Beyond
             logger.LogInformation("  got desc to peer at {hostport}", hostport);
             var hit = false;
             await State.sem.WaitAsync();
+            State.TopoCheck(desc);
             foreach (var p in State.peers)
             {
                 if (p.info.Id.Equals(desc.Id))
@@ -609,6 +635,7 @@ namespace Beyond
         public override async Task<Void> Announce(Peer peer, ServerCallContext ctx)
         {
             await State.sem.WaitAsync();
+            State.TopoCheck(peer);
             if (State.peers.Find(p=>p.info.Id.Equals(peer.Id)) != null
                 || State.self.Id.Equals(peer.Id))
             {
