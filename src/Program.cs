@@ -19,6 +19,11 @@ using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Hosting;
 
+#if WINDOWS
+using DokanNet;
+using DokanNet.Logging;
+#endif
+
 namespace Beyond
 {
     class Program
@@ -162,7 +167,11 @@ namespace Beyond
                 var bclient = new BeyondClient.BeyondClientClient(channel);
                 if (!string.IsNullOrEmpty(Mount))
                 {
+#if WINDOWS
+                    var fs = new Dokan(bclient, FsName, Uid, Gid, crypto, ImmutableCacheSize, MutableCacheDuration);
+#else
                     var fs = new FileSystem(bclient, FsName, Uid, Gid, crypto, ImmutableCacheSize, MutableCacheDuration);
+#endif
                     if (!string.IsNullOrEmpty(MountKey))
                     { // always try to insert key
                         var toput = crypto.ExportOwnerPublicKey();
@@ -192,7 +201,24 @@ namespace Beyond
                         }
                         fs.MkFS();
                     }
+#if WINDOWS
+                    using (var mre = new System.Threading.ManualResetEvent(false))
+                    using (var dokanLogger = new ConsoleLogger("[Dokan] "))
+                    using (var dokan = new Dokan(dokanLogger))
+                    var dokanBuilder = new DokanInstanceBuilder(dokan)
+                        .ConfigureLogger(() => dokanLogger)
+                        .ConfigureOptions(options =>
+                        {
+                            //options.Options = DokanOptions.DebugMode | DokanOptions.EnableNotificationAPI;
+                            options.MountPoint = mountPoint;
+                        });
+                    using (var dokanInstance = dokanBuilder.Build(fs))
+                    {
+                        mre.WaitOne();
+                    }
+#else
                     fs.Run(mountPoint, new string[] {});
+#endif
                 }
                 else if (!string.IsNullOrEmpty(Evict))
                     await bclient.EvictAsync(Utils.StringKey(Evict));

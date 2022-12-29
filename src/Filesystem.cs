@@ -657,7 +657,7 @@ namespace Beyond
 		{
 		    return OpenOrCreate(path, false, info);
 		}
-		private Errno OpenOrCreate(string path, bool allowCreation, OpenedPathInfo info, FilePermissions? mode=null, OpenFlags? flags = null)
+		public Errno OpenOrCreate(string path, bool allowCreation, OpenedPathInfo info, FilePermissions? mode=null, OpenFlags? flags = null)
 		{
 		    var fl = info?.OpenFlags ?? flags.Value;
 		    var amask = fl & (OpenFlags.O_RDONLY | OpenFlags.O_WRONLY | OpenFlags.O_RDWR);
@@ -897,6 +897,8 @@ namespace Beyond
 		        bytesWritten = 0;
 		        if (!openedFiles.TryGetValue(path, out var oh))
 		            return Errno.EBADF;
+		        if (offset == -1) // dokan append mode
+		            offset = (long)oh.fileBlock.Block.Data.File.Size;
 		        ulong start_chunk = (ulong)((ulong)offset / CHUNK_SIZE);
 		        ulong end_chunk = (ulong)((ulong)(offset + buf.Length-1) / CHUNK_SIZE);
 		        for (var c = start_chunk; c <= end_chunk; ++c)
