@@ -1,4 +1,4 @@
-# Beyond: A prototype distributed filesystem for Linux
+# Beyond: A prototype distributed filesystem for Linux and Windows
 
 ## What is it?
 
@@ -11,7 +11,11 @@ a configureable replication factor.
 
 Clone the repository and its submodules.
 
-Then run `./build-libs.sh` in directory `Mono.Fuse.NETStandard`.
+Linux: Then run `./build-libs.sh` in directory `Mono.Fuse.NETStandard`.
+
+Windows: Install the Dokan file system driver version 2 from their release page.
+They provide a convenient installer executable.
+
 
 Then `dotnet build` in `src`.
 
