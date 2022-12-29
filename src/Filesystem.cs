@@ -904,7 +904,7 @@ namespace Beyond
 		        for (var c = start_chunk; c <= end_chunk; ++c)
 		        {
 		            int wr = 0;
-		            var err = WriteToChunk(oh, c, offset - (long)c * (long)CHUNK_SIZE, buf, bytesWritten, out wr);
+		            var err = WriteToChunk(oh, c, offset + bytesWritten - (long)c * (long)CHUNK_SIZE, buf, bytesWritten, out wr);
 		            if (err != 0)
 		                return err;
 		            bytesWritten += wr;

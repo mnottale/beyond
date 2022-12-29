@@ -251,6 +251,16 @@ namespace Beyond
         {
             fileName = fileName.Replace("\\", "/");
             var err = _backend.OnWriteHandle(fileName, null, buffer, offset, out bytesWritten);
+            if (err == Errno.EBADF)
+            { // ooookay, according to dokan, this is expected, see for instance
+              // https://github.com/dokan-dev/dokany/issues/1016
+              // Todo: implement shadow handles to alieviate the cost
+              var openerr = _backend.OpenOrCreate(fileName, false, null, null, OpenFlags.O_RDWR);
+              if (openerr != 0)
+                   return Trace(nameof(WriteFile), fileName, info, DokanResult.InternalError);
+              err = _backend.OnWriteHandle(fileName, null, buffer, offset, out bytesWritten);
+              _backend.OnReleaseHandle(fileName, null);
+            }
             if (err != 0)
                 return Trace(nameof(WriteFile), fileName, info, DokanResult.InternalError);
             return Trace(nameof(WriteFile), fileName, info, DokanResult.Success, "out " + bytesWritten.ToString(),
