@@ -175,9 +175,11 @@ namespace Beyond
                     null,
                     NativeConvert.FromOctalPermissionString("777"),
                     readAccess ? OpenFlags.O_RDONLY : OpenFlags.O_RDWR);
+                _logger.Warn("OPEN " + fileName + " "  + err.ToString());
                 if (err != 0)
                     return Trace(nameof(CreateFile), fileName, info, access, share, mode, options, attributes,
                         DokanResult.AccessDenied);
+               info.Context = "handle";
             }
             return Trace(nameof(CreateFile), fileName, info, access, share, mode, options, attributes,
                 result);
@@ -190,7 +192,8 @@ namespace Beyond
             if (info.Context != null)
                 Console.WriteLine(DokanFormat($"{nameof(Cleanup)}('{fileName}', {info} - entering"));
 #endif
-
+            if (info.Context != null && info.Context as string == "handle")
+                _backend.OnReleaseHandle(fileName, null);
             info.Context = null;
 
             if (info.DeleteOnClose)
@@ -214,8 +217,9 @@ namespace Beyond
             if (info.Context != null)
                 Console.WriteLine(DokanFormat($"{nameof(CloseFile)}('{fileName}', {info} - entering"));
 #endif
-            _backend.OnReleaseHandle(fileName, null);
-            info.Context = null;
+            /*if (info.Context != null)
+                _backend.OnReleaseHandle(fileName, null);
+            info.Context = null;*/
             Trace(nameof(CloseFile), fileName, info, DokanResult.Success);
             // could recreate cleanup code here but this is not called sometimes
         }
@@ -225,7 +229,10 @@ namespace Beyond
             fileName = fileName.Replace("\\", "/");
             var err = _backend.OnReadHandle(fileName, null, buffer, offset, out bytesRead);
             if (err != 0)
+            {
+                _logger.Warn("READ ERROR " + fileName + " "  + err.ToString() + " " + offset.ToString());
                 return Trace(nameof(ReadFile), fileName, info, DokanResult.InternalError);
+            }
             return Trace(nameof(ReadFile), fileName, info, DokanResult.Success, "out " + bytesRead.ToString(),
                 offset.ToString(CultureInfo.InvariantCulture));
         }
