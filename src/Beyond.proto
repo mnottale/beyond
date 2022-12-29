@@ -15,6 +15,8 @@ service BeyondNode {
    rpc Describe(Void) returns (Peer) {}
    rpc Announce(Peer) returns (Void) {}
    rpc GetPeers(Void) returns (Peers) {}
+   rpc Evict(Key) returns (Error) {}
+   rpc HealBlock(BlockAndKey) returns (Error) {} // can only touch owners
 
    // delete this
    rpc Get(Key) returns (Blob) {}

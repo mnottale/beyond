@@ -46,7 +46,15 @@ namespace Beyond
                 var dir = root + "/" + s;
                 foreach (var f in Directory.GetFiles(dir))
                 {
-                    res.Add(Utils.StringKey(f));
+                    try
+                    {
+                        var fn = Path.GetFileName(f);
+                        res.Add(Utils.StringKey(fn));
+                    }
+                    catch (Exception e)
+                    {
+                        Console.WriteLine($"BRONK {f} {e}");
+                    }
                 }
             }
             return res;

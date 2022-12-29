@@ -6,6 +6,7 @@ import subprocess
 import os
 import sys
 import time
+import shutil
 
 def opj(*args):
     return os.path.join(*args)
@@ -190,6 +191,23 @@ class TestBasic(unittest.TestCase):
         time.sleep(0.3)
         msk = int(getxattr(fn, 'beyond.ownersstate').decode('utf-8'))
         self.assertEqual(7, msk)
+    def test_evict_heal(self):
+        fn = opj(self.alice, 'fileeh')
+        put(fn, 'data')
+        os.mkdir(opj(self.alice, 'direh'))
+        time.sleep(0.3)
+        nk = self.beyond.node_key(1)
+        self.beyond.kill_node(1)
+        self.beyond.wipe_node(1)
+        self.beyond.run_evict(nk)
+        print(getxattr(fn, 'beyond.owners').decode('utf-8').split('\n'))
+        self.assertEqual(2+1, len(getxattr(fn, 'beyond.owners').decode('utf-8').split('\n')))
+        self.beyond.restart_node(1)
+        self.beyond.run_heal()
+        print(getxattr(fn, 'beyond.owners').decode('utf-8').split('\n'))
+        self.assertEqual(3+1, len(getxattr(fn, 'beyond.owners').decode('utf-8').split('\n')))
+        self.assertEqual(3+1, len(getxattr(opj(self.alice, 'direh'), 'beyond.owners').decode('utf-8').split('\n')))
+        
         
 me = os.path.dirname(os.path.realpath(__file__))
 class Beyond:
@@ -255,12 +273,33 @@ class Beyond:
          handle = subprocess.Popen(cmd, cwd=os.path.join(me, 'src'), stdout=out, stderr=out)
          self.nodes[i] = (handle, out)
          time.sleep(1)
+    def run_evict(self, id):
+        out=open(os.path.join(self.root, 'evict-'+id+'.log'), 'w')
+        cmd = ['/usr/lib/dotnet/dotnet6-6.0.110/dotnet','run','--no-build', '--',
+                '--evict', id,
+                '--replication', str(self.replication_factor),
+                '--peers', 'http://localhost:{}'.format(self.port)
+        ]
+        subprocess.run(cmd, stdout=out, stderr=out)
+        out.close()
+    def run_heal(self):
+        out=open(os.path.join(self.root, 'heal.log'), 'w')
+        cmd = ['/usr/lib/dotnet/dotnet6-6.0.110/dotnet','run','--no-build', '--',
+                '--heal',
+                '--replication', str(self.replication_factor),
+                '--peers', 'http://localhost:{}'.format(self.port)
+        ]
+        subprocess.run(cmd, stdout=out, stderr=out)
+        out.close()
     def wipe_node(self, i):
         # Wipes node key and data, a restart will spawn under a new key
         shutil.rmtree(os.path.join(self.root, str(i)))
         os.mkdir(os.path.join(self.root, str(i)))
     def mount_point(self, i=0):
         return os.path.join(self.root, 'mount'+str(i))
+    def node_key(self, i):
+        with open(os.path.join(self.root, str(i), 'identity.sig'), 'r') as f:
+            return f.read()
     def teardown(self):
         for i in range(len(self.mounts)):
             subprocess.run(['umount', self.mount_point(i)])

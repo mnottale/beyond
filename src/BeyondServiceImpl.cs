@@ -60,44 +60,16 @@ namespace Beyond
         {
             return State.backend.Query(k, ctx);
         }
-        private async Task<bool> DoEvict(Key k, Key owner)
-        {
-            try
-            {
-                var block = await State.backend.Query(k, null);
-                if (block.Owners == null || !block.Owners.Owners.Contains(owner))
-                    return false;
-                block.Owners.Owners.Remove(owner);
-                block.Version = block.Version + 1;
-                var bak = new BlockAndKey();
-                bak.Key = k;
-                bak.Block = block;
-                await State.backend.TransactionalUpdate(bak, null);
-                return true;
-            }
-            catch (Exception e)
-            {
-                State.logger.LogError(e, "failed to evict a key");
-                return false;
-            }
-        }
         public override async Task<Error> Evict(Key owner, ServerCallContext ctx)
         {
-            var cnt = 0;
-            foreach (var k in (await State.backend.ListKeys(new Void(), ctx)).Keys)
-            {
-                if (await DoEvict(k, owner))
-                    cnt++;
-            }
+            var tasks = new List<Task<Error>>();
+            tasks.Add(State.backend.Evict(owner, ctx));
             foreach (var p in State.peers)
             {
-                foreach (var kk in (await p.client.ListKeysAsync(new Void())).Keys)
-                {
-                    if (await DoEvict(kk, owner))
-                        cnt++;
-                }
+                tasks.Add(p.client.EvictAsync(owner).ResponseAsync);
             }
-            State.logger.LogInformation("Evicted {count} blocks", cnt);
+            await Task.WhenAll(tasks);
+            State.logger.LogInformation("Eviction of {id} completed", owner);
             return Utils.ErrorFromCode(Error.Types.ErrorCode.Ok);
         }
         private async Task<bool> DoHeal(Key k)
@@ -107,22 +79,33 @@ namespace Beyond
                 var block = await State.backend.Query(k, null);
                 if (block.Owners == null || block.Owners.Owners.Count >= State.replicationFactor)
                     return false;
+                var prevCount = block.Owners.Owners.Count;
                 List<BPeer> candidates = new List<BPeer>(State.peers);
                 candidates.Add(null); // me
                 candidates.Shuffle();
+                var msk = 0;
+                var bit = 1;
                 foreach (var co in block.Owners.Owners)
                 {
                     if (co.Equals(State.self.Id))
+                    {
                         candidates.Remove(null);
+                        msk |= bit;
+                    }
                     else
                     {
                         var hit = candidates.Find(x=>x.info.Id.Equals(co));
                         if (hit != null)
+                        {
                             candidates.Remove(hit);
+                            msk |= bit;
+                        }
                     }
+                    bit <<= 1;
                 }
                 if (!candidates.Any())
                     return false;
+                block.Owners.UptodateMask = (ulong)msk;
                 var toAdd = State.replicationFactor - block.Owners.Owners.Count;
                 while (toAdd > 0 && candidates.Any())
                 {
@@ -130,11 +113,28 @@ namespace Beyond
                     block.Owners.Owners.Add(candidates[0].info.Id);
                     candidates.RemoveAt(0);
                 }
-                block.Version++;
+                var bakheal = new BlockAndKey();
+                bakheal.Key = k;
+                bakheal.Block = new Block();
+                bakheal.Block.Owners = block.Owners;
                 var bak = new BlockAndKey();
                 bak.Key = k;
                 bak.Block = block;
-                await State.backend.TransactionalUpdate(bak, null);
+                var tasks = new List<Task<Error>>();
+                var idx = 0;
+                foreach (var co in block.Owners.Owners)
+                {
+                    if (co.Equals(State.self.Id))
+                        tasks.Add(idx < prevCount ? State.backend.HealBlock(bakheal, null) : State.backend.Write(bak, null));
+                    else
+                    {
+                        var hit = State.peers.Find(x=>x.info.Id.Equals(co));
+                        if (hit != null)
+                            tasks.Add(idx < prevCount ? hit.client.HealBlockAsync(bakheal).ResponseAsync : hit.client.WriteAsync(bak).ResponseAsync);
+                    }
+                    idx++;
+                }
+                await Task.WhenAll(tasks);
                 return true;
             }
             catch (Exception e)
@@ -198,6 +198,7 @@ namespace Beyond
                     State.self.Id = Utils.RandomKey();
                     var serialized = State.self.Id.ToByteArray();
                     File.WriteAllBytes(State.rootPath + "/identity", serialized);
+                    File.WriteAllText(State.rootPath + "/identity.sig", Utils.KeyString(State.self.Id));
                 }
                 State.self.Addresses.Add(State.AdvertiseAddress);
                 State.self.Port = State.port;
@@ -220,6 +221,47 @@ namespace Beyond
             if (State.storage.Has(key))
                 res.Add(null);
             return res;
+        }
+        public override async Task<Error> Evict(Key owner, ServerCallContext ctx)
+        {
+            var scanned = 0;
+            var evicted = 0;
+            foreach (var k in State.storage.List())
+            {
+                scanned++;
+                var blk = await GetBlock(k, ctx);
+                if (blk.Owners == null)
+                    continue;
+                var pos = 0;
+                foreach (var bo in blk.Owners.Owners)
+                {
+                    if (bo.Equals(owner))
+                        break;
+                    pos++;
+                }
+                if (pos >= blk.Owners.Owners.Count)
+                    continue;
+                blk.Owners.Owners.RemoveAt(pos);
+                // fix uptodatemask
+                var msk = (int)blk.Owners.UptodateMask;
+                var mskLow = msk & ((1<<pos)-1);
+                var mskHigh = msk & ~((1<<pos)-1);
+                msk = mskLow | (mskHigh >> 1);
+                blk.Owners.UptodateMask = (ulong)msk;
+                var serialized = blk.ToByteArray();
+                State.storage.Put(k, serialized);
+                evicted++;
+            }
+            logger.LogInformation("Eviction of {key}: scanned {scan} evicted {evict}", owner, scanned, evicted);
+            return Utils.ErrorFromCode(Error.Types.ErrorCode.Ok);
+        }
+        public override async Task<Error> HealBlock(BlockAndKey bak, ServerCallContext ctx)
+        {
+            var blk = await GetBlock(bak.Key, ctx);
+            blk.Owners = bak.Block.Owners;
+            var serialized = blk.ToByteArray();
+            State.storage.Put(bak.Key, serialized);
+            return Utils.ErrorFromCode(Error.Types.ErrorCode.Ok);
         }
         public async Task<Error> Delete(BlockAndKey bak, ServerCallContext ctx)
         {
