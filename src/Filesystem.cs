@@ -37,9 +37,9 @@ namespace Beyond
         private uint permGid = 0;
         private Crypto crypto = null;
         private Cache cache = null;
-        public FileSystem(BeyondClient.BeyondClientClient client, string fsName = null, uint uid=0, uint gid=0, Crypto c = null, ulong immutableCacheSize = 0, ulong mutableCacheDuration = 0)
+        public FileSystem(ILoggerFactory loggerFactory, BeyondClient.BeyondClientClient client, string fsName = null, uint uid=0, uint gid=0, Crypto c = null, ulong immutableCacheSize = 0, ulong mutableCacheDuration = 0)
         {
-            logger = Logger.loggerFactory.CreateLogger<BeyondServiceImpl>();
+            logger = loggerFactory.CreateLogger<BeyondServiceImpl>();
             this.client = client;
             permUid = uid;
             permGid = gid;

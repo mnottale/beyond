@@ -29,9 +29,9 @@ public class Crypto
 
     public Func<Key, Task<Block>> GetKeyBlock;
     public Func<Key, Task<Block>> GetPreviousBlock;
-    public Crypto()
+    public Crypto(ILoggerFactory loggerFactory)
     {
-        _logger = Logger.loggerFactory.CreateLogger<Crypto>();
+        _logger = loggerFactory.CreateLogger<Crypto>();
     }
     public void SetAdmins(IEnumerable<Key> adms)
     {

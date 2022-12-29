@@ -72,6 +72,8 @@ namespace Beyond
         public ulong MutableCacheDuration { get; }
         [Option("--passphrase")]
         public string Passphrase { get; }
+        [Option("--logging")]
+        public string Logging { get; }
         static void Main(string[] args) => CommandLineApplication.Execute<Program>(args);
         
         public string GetPassword()
@@ -89,7 +91,40 @@ namespace Beyond
         }
         protected async Task OnExecuteAsync(CancellationToken token)
         {
-            var logger = Logger.loggerFactory.CreateLogger<Program>();
+            var levelNames = new Dictionary<string, LogLevel>
+            {
+                {"trace", LogLevel.Trace},
+                {"debug", LogLevel.Debug},
+                {"info", LogLevel.Information},
+                {"warn", LogLevel.Warning},
+                {"err", LogLevel.Error},
+            };
+            var categs = new Dictionary<string, string>
+            {
+                {"crypto", "Beyond.Crypto"},
+                {"fs", "Beyond.Filesystem"},
+                {"storage", "Beyond.Storage"},
+                {"node", "Beyond.BeyondServiceImpl"},
+            };
+            var loggerFactory = LoggerFactory.Create(logging =>
+                {
+                    logging.AddConsole();
+                    logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
+                    logging.AddFilter("Microsoft.AspNetCore.Routing.EndpointMiddleware", LogLevel.Warning);
+                    if (!string.IsNullOrEmpty(Logging))
+                    {
+                        foreach(var l in Logging.Split(','))
+                        {
+                            var kv = l.Split('=');
+                            var ll = levelNames[kv[1].ToLower()];
+                            if (categs.TryGetValue(kv[0].ToLower(), out var cn))
+                                logging.AddFilter(cn, ll);
+                            else
+                                Console.WriteLine("Unknown log category " + kv[0]);
+                        }
+                    }
+                });
+            var logger = loggerFactory.CreateLogger<Program>();
             if (!string.IsNullOrEmpty(CreateKey))
             {
                 Console.WriteLine("Please enter a passhrase for your key:");
@@ -119,7 +154,7 @@ namespace Beyond
             Crypto crypto = null;
             if (!string.IsNullOrEmpty(MountKey) || Crypt)
             {
-                crypto = new Crypto();
+                crypto = new Crypto(loggerFactory);
                 if (!string.IsNullOrEmpty(MountKey))
                 {
                     var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -169,9 +204,9 @@ namespace Beyond
                 {
 #if Windows
                     using var dokanLogger = new ConsoleLogger("[Dokan] ");
-                    var fs = new DokanFS(dokanLogger, bclient, FsName, Uid, Gid, crypto, ImmutableCacheSize, MutableCacheDuration);
+                    var fs = new DokanFS(loggerFactory, bclient, FsName, Uid, Gid, crypto, ImmutableCacheSize, MutableCacheDuration);
 #else
-                    var fs = new FileSystem(bclient, FsName, Uid, Gid, crypto, ImmutableCacheSize, MutableCacheDuration);
+                    var fs = new FileSystem(loggerFactory, bclient, FsName, Uid, Gid, crypto, ImmutableCacheSize, MutableCacheDuration);
 #endif
                     if (!string.IsNullOrEmpty(MountKey))
                     { // always try to insert key
@@ -281,7 +316,7 @@ namespace Beyond
                     logger.LogInformation("Will advertise on {address}", aa);
                 }
                 State.AdvertiseAddress = aa;
-                State.backend = new BeyondServiceImpl(Logger.loggerFactory.CreateLogger<BeyondServiceImpl>());
+                State.backend = new BeyondServiceImpl(loggerFactory.CreateLogger<BeyondServiceImpl>());
                 //var client = new BeyondClientImpl();
                 var builder = WebApplication.CreateBuilder();
                 builder.Services.AddGrpc();

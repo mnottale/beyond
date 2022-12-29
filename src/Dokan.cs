@@ -5,8 +5,8 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Security.AccessControl;
+using Microsoft.Extensions.Logging;
 using DokanNet;
-using DokanNet.Logging;
 using static DokanNet.FormatProviders;
 using FileAccess = DokanNet.FileAccess;
 using Mono.Fuse.NETStandard;
@@ -28,10 +28,10 @@ namespace Beyond
         private readonly ILogger _logger;
         private readonly DokanFS _backend;
 
-        public DokanFS(ILogger logger, BeyondClient.BeyondClientClient client, string fsName = null, uint uid=0, uint gid=0, Crypto c = null, ulong immutableCacheSize = 0, ulong mutableCacheDuration = 0)
-        :base (client, fsName, uid, gid, c, immutableCacheSize, mutableCacheDuration)
+        public DokanFS(ILoggerFactory loggerFactory, BeyondClient.BeyondClientClient client, string fsName = null, uint uid=0, uint gid=0, Crypto c = null, ulong immutableCacheSize = 0, ulong mutableCacheDuration = 0)
+        :base (loggerFactory, client, fsName, uid, gid, c, immutableCacheSize, mutableCacheDuration)
         {
-            _logger = logger;
+            _logger = loggerFactory.CreateLogger<DokanFS>();
             _backend = this;
         }
 
@@ -43,7 +43,7 @@ namespace Beyond
                 ? ", " + string.Join(", ", parameters.Select(x => string.Format(DefaultFormatProvider, "{0}", x)))
                 : string.Empty;
 
-            _logger.Debug(DokanFormat($"{method}('{fileName}', {info}{extraParameters}) -> {result}"));
+            _logger.LogDebug(DokanFormat($"{method}('{fileName}', {info}{extraParameters}) -> {result}"));
 #endif
 
             return result;
@@ -54,7 +54,7 @@ namespace Beyond
             NtStatus result)
         {
 #if TRACE
-            _logger.Debug(
+            _logger.LogDebug(
                 DokanFormat(
                     $"{method}('{fileName}', {info}, [{access}], [{share}], [{mode}], [{options}], [{attributes}]) -> {result}"));
 #endif
@@ -175,7 +175,7 @@ namespace Beyond
                     null,
                     NativeConvert.FromOctalPermissionString("777"),
                     readAccess ? OpenFlags.O_RDONLY : OpenFlags.O_RDWR);
-                _logger.Warn("OPEN " + fileName + " "  + err.ToString());
+                _logger.LogWarning("OPEN " + fileName + " "  + err.ToString());
                 if (err != 0)
                     return Trace(nameof(CreateFile), fileName, info, access, share, mode, options, attributes,
                         DokanResult.AccessDenied);
@@ -228,9 +228,19 @@ namespace Beyond
         {
             fileName = fileName.Replace("\\", "/");
             var err = _backend.OnReadHandle(fileName, null, buffer, offset, out bytesRead);
+            if (err == Errno.EBADF)
+            { // ooookay, according to dokan, this is expected, see for instance
+              // https://github.com/dokan-dev/dokany/issues/1016
+              // Todo: implement shadow handles to alieviate the cost
+              var openerr = _backend.OpenOrCreate(fileName, false, null, null, OpenFlags.O_RDONLY);
+              if (openerr != 0)
+                   return Trace(nameof(ReadFile), fileName, info, DokanResult.InternalError);
+              err = _backend.OnReadHandle(fileName, null, buffer, offset, out bytesRead);
+              _backend.OnReleaseHandle(fileName, null);
+            }
             if (err != 0)
             {
-                _logger.Warn("READ ERROR " + fileName + " "  + err.ToString() + " " + offset.ToString());
+                _logger.LogWarning("READ ERROR " + fileName + " "  + err.ToString() + " " + offset.ToString());
                 return Trace(nameof(ReadFile), fileName, info, DokanResult.InternalError);
             }
             return Trace(nameof(ReadFile), fileName, info, DokanResult.Success, "out " + bytesRead.ToString(),
@@ -294,7 +304,7 @@ namespace Beyond
         }
         public NtStatus FindFiles(string fileName, out IList<FileInformation> files, IDokanFileInfo info)
         {
-            _logger.Info("*** FF " + fileName);
+            _logger.LogInformation("*** FF " + fileName);
             var err = _backend.OnReadDirectory(fileName.Replace("\\", "/"), null, out var entries);
             if (err != 0)
             {
@@ -305,9 +315,9 @@ namespace Beyond
             foreach (var fi in entries)
             {
                 GetFileInformation(fileName.Replace("\\", "/") + "/" + fi.Name, out var finfo, null);
-                _logger.Info("Fillling FI from " + finfo.FileName);
+                _logger.LogInformation("Fillling FI from " + finfo.FileName);
                 finfo.FileName = GetFileName(finfo.FileName);//fileName + ((fileName ==  "\\") ? "" : "\\") + GetFileName(finfo.FileName);
-                _logger.Info("Fillling FI with " + finfo.FileName);
+                _logger.LogInformation("Fillling FI with " + finfo.FileName);
                 files.Add(finfo);
             }
             // This function is not called because FindFilesWithPattern is implemented
