@@ -222,6 +222,7 @@ class Beyond:
             cmd = ['/usr/lib/dotnet/dotnet6-6.0.110/dotnet','run','--no-build', '--',
                 '--serve', os.path.join(self.root, str(i)),
                 '--port', str(port+i),
+                '--advertise-address', '192.168.1.1/24',
                 '--crypt',
                 '--replication', str(replication_factor)
             ]

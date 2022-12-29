@@ -19,7 +19,7 @@ using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Hosting;
 
-#if WINDOWS
+#if Windows
 using DokanNet;
 using DokanNet.Logging;
 #endif
@@ -167,8 +167,9 @@ namespace Beyond
                 var bclient = new BeyondClient.BeyondClientClient(channel);
                 if (!string.IsNullOrEmpty(Mount))
                 {
-#if WINDOWS
-                    var fs = new Dokan(bclient, FsName, Uid, Gid, crypto, ImmutableCacheSize, MutableCacheDuration);
+#if Windows
+                    using var dokanLogger = new ConsoleLogger("[Dokan] ");
+                    var fs = new DokanFS(dokanLogger, bclient, FsName, Uid, Gid, crypto, ImmutableCacheSize, MutableCacheDuration);
 #else
                     var fs = new FileSystem(bclient, FsName, Uid, Gid, crypto, ImmutableCacheSize, MutableCacheDuration);
 #endif
@@ -201,20 +202,21 @@ namespace Beyond
                         }
                         fs.MkFS();
                     }
-#if WINDOWS
+#if Windows
                     using (var mre = new System.Threading.ManualResetEvent(false))
-                    using (var dokanLogger = new ConsoleLogger("[Dokan] "))
                     using (var dokan = new Dokan(dokanLogger))
-                    var dokanBuilder = new DokanInstanceBuilder(dokan)
+                    {
+                        var dokanBuilder = new DokanInstanceBuilder(dokan)
                         .ConfigureLogger(() => dokanLogger)
                         .ConfigureOptions(options =>
+                            {
+                                //options.Options = DokanOptions.DebugMode | DokanOptions.EnableNotificationAPI;
+                                options.MountPoint = mountPoint;
+                            });
+                        using (var dokanInstance = dokanBuilder.Build(fs))
                         {
-                            //options.Options = DokanOptions.DebugMode | DokanOptions.EnableNotificationAPI;
-                            options.MountPoint = mountPoint;
-                        });
-                    using (var dokanInstance = dokanBuilder.Build(fs))
-                    {
-                        mre.WaitOne();
+                            mre.WaitOne();
+                        }
                     }
 #else
                     fs.Run(mountPoint, new string[] {});

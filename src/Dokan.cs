@@ -13,7 +13,7 @@ using Mono.Fuse.NETStandard;
 using Mono.Unix.Native;
 namespace Beyond
 {
-    internal class Dokan : FileSystem, IDokanOperations
+    internal class DokanFS : FileSystem, IDokanOperations
     {
 
         private const FileAccess DataAccess = FileAccess.ReadData | FileAccess.WriteData | FileAccess.AppendData |
@@ -26,9 +26,9 @@ namespace Beyond
                                                    FileAccess.GenericWrite;
 
         private readonly ILogger _logger;
-        private readonly Dokan _backend;
+        private readonly DokanFS _backend;
 
-        public Dokan(ILogger logger, BeyondClient.BeyondClientClient client, string fsName = null, uint uid=0, uint gid=0, Crypto c = null, ulong immutableCacheSize = 0, ulong mutableCacheDuration = 0)
+        public DokanFS(ILogger logger, BeyondClient.BeyondClientClient client, string fsName = null, uint uid=0, uint gid=0, Crypto c = null, ulong immutableCacheSize = 0, ulong mutableCacheDuration = 0)
         :base (client, fsName, uid, gid, c, immutableCacheSize, mutableCacheDuration)
         {
             _logger = logger;
@@ -81,6 +81,7 @@ namespace Beyond
         public NtStatus CreateFile(string fileName, FileAccess access, FileShare share, FileMode mode,
             FileOptions options, FileAttributes attributes, IDokanFileInfo info)
         {
+            fileName = fileName.Replace("\\", "/");
             var result = DokanResult.Success;
             Errno err = 0;
             if (info.IsDirectory)
@@ -184,6 +185,7 @@ namespace Beyond
 
         public void Cleanup(string fileName, IDokanFileInfo info)
         {
+            fileName = fileName.Replace("\\", "/");
 #if TRACE
             if (info.Context != null)
                 Console.WriteLine(DokanFormat($"{nameof(Cleanup)}('{fileName}', {info} - entering"));
@@ -207,6 +209,7 @@ namespace Beyond
 
         public void CloseFile(string fileName, IDokanFileInfo info)
         {
+            fileName = fileName.Replace("\\", "/");
 #if TRACE
             if (info.Context != null)
                 Console.WriteLine(DokanFormat($"{nameof(CloseFile)}('{fileName}', {info} - entering"));
@@ -219,6 +222,7 @@ namespace Beyond
 
         public NtStatus ReadFile(string fileName, byte[] buffer, out int bytesRead, long offset, IDokanFileInfo info)
         {
+            fileName = fileName.Replace("\\", "/");
             var err = _backend.OnReadHandle(fileName, null, buffer, offset, out bytesRead);
             if (err != 0)
                 return Trace(nameof(ReadFile), fileName, info, DokanResult.InternalError);
@@ -228,6 +232,7 @@ namespace Beyond
 
         public NtStatus WriteFile(string fileName, byte[] buffer, out int bytesWritten, long offset, IDokanFileInfo info)
         {
+            fileName = fileName.Replace("\\", "/");
             var err = _backend.OnWriteHandle(fileName, null, buffer, offset, out bytesWritten);
             if (err != 0)
                 return Trace(nameof(WriteFile), fileName, info, DokanResult.InternalError);
@@ -237,13 +242,14 @@ namespace Beyond
 
         public NtStatus FlushFileBuffers(string fileName, IDokanFileInfo info)
         {
+            fileName = fileName.Replace("\\", "/");
             _backend.OnSynchronizeHandle(fileName, null, false);
             return Trace(nameof(FlushFileBuffers), fileName, info, DokanResult.Success);
         }
 
         public NtStatus GetFileInformation(string fileName, out FileInformation fileInfo, IDokanFileInfo info)
         {
-            var err = _backend.OnGetPathStatus(fileName, out var stat);
+            var err = _backend.OnGetPathStatus(fileName.Replace("\\", "/"), out var stat);
             if (err != 0) // FIXME error code
             {
                 fileInfo = new FileInformation
@@ -273,9 +279,16 @@ namespace Beyond
             return Trace(nameof(GetFileInformation), fileName, info, DokanResult.Success);
         }
 
+        private string GetFileName(string input)
+        {
+            input = input.Replace("\\", "/");
+            var comps = input.Split('/');
+            return comps[comps.Length-1];
+        }
         public NtStatus FindFiles(string fileName, out IList<FileInformation> files, IDokanFileInfo info)
         {
-            var err = _backend.OnReadDirectory(fileName, null, out var entries);
+            _logger.Info("*** FF " + fileName);
+            var err = _backend.OnReadDirectory(fileName.Replace("\\", "/"), null, out var entries);
             if (err != 0)
             {
                 files = null;
@@ -284,7 +297,10 @@ namespace Beyond
             files = new List<FileInformation>();
             foreach (var fi in entries)
             {
-                GetFileInformation(fileName + "/" + fi.Name, out var finfo, null);
+                GetFileInformation(fileName.Replace("\\", "/") + "/" + fi.Name, out var finfo, null);
+                _logger.Info("Fillling FI from " + finfo.FileName);
+                finfo.FileName = GetFileName(finfo.FileName);//fileName + ((fileName ==  "\\") ? "" : "\\") + GetFileName(finfo.FileName);
+                _logger.Info("Fillling FI with " + finfo.FileName);
                 files.Add(finfo);
             }
             // This function is not called because FindFilesWithPattern is implemented
@@ -306,7 +322,7 @@ namespace Beyond
 
         public NtStatus DeleteFile(string fileName, IDokanFileInfo info)
         {
-            var err = _backend.OnRemoveFile(fileName);
+            var err = _backend.OnRemoveFile(fileName.Replace("\\", "/"));
             if (err != 0)
                 return Trace(nameof(DeleteFile), fileName, info, DokanResult.AccessDenied);
             return Trace(nameof(DeleteFile), fileName, info, DokanResult.Success);
@@ -315,7 +331,7 @@ namespace Beyond
 
         public NtStatus DeleteDirectory(string fileName, IDokanFileInfo info)
         {
-            var err = _backend.OnRemoveDirectory(fileName);
+            var err = _backend.OnRemoveDirectory(fileName.Replace("\\", "/"));
             if (err != 0)
                 return Trace(nameof(DeleteDirectory), fileName, info, DokanResult.AccessDenied);
             return Trace(nameof(DeleteDirectory), fileName, info, DokanResult.Success);
@@ -325,7 +341,7 @@ namespace Beyond
 
         public NtStatus MoveFile(string oldName, string newName, bool replace, IDokanFileInfo info)
         {
-            var err = _backend.OnRenamePath(oldName, newName);
+            var err = _backend.OnRenamePath(oldName.Replace("\\", "/"), newName.Replace("\\", "/"));
             if (err != 0)
                 return Trace(nameof(MoveFile), oldName, info, DokanResult.AccessDenied);
             return Trace(nameof(MoveFile), oldName, info, DokanResult.Success, newName,
@@ -334,7 +350,7 @@ namespace Beyond
 
         public NtStatus SetEndOfFile(string fileName, long length, IDokanFileInfo info)
         {
-            var err = _backend.OnTruncateFile(fileName, length);
+            var err = _backend.OnTruncateFile(fileName.Replace("\\", "/"), length);
             if (err != 0)
                 return Trace(nameof(SetEndOfFile), fileName, info, DokanResult.AccessDenied);
             return Trace(nameof(SetEndOfFile), fileName, info, DokanResult.Success);
