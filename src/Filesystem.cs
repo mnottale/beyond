@@ -323,6 +323,9 @@ namespace Beyond
 		        return err;
 		    var components = path.Split('/');
 		    var last = components[components.Length-1];
+		    var exists = parent.Block.Data.Directory.Entries.Where(d=>d.Name == last).FirstOrDefault();
+		    if (exists != null)
+		        return Errno.EEXIST;
 		    // first create and push the new directory block
 		    var bak = new BlockAndKey();
 		    if (crypto == null)
@@ -472,6 +475,10 @@ namespace Beyond
 		}
 		protected override Errno OnRenamePath (string from, string to)
 		{
+		    return OnRenamePath(from, to, true);
+		}
+		protected Errno OnRenamePath (string from, string to, bool replace)
+		{
 		    logger.LogInformation("MV {from} {to}", from, to);
 		    try
 		    {
@@ -492,6 +499,8 @@ namespace Beyond
 		        {
 		            if (exists.EntryType == DirectoryEntry.Types.EntryType.Directory)
 		                return Errno.EISDIR;
+		            if (!replace)
+		                return Errno.EEXIST;
 		            err = OnRemoveFile(to);
 		            if (err != 0)
 		                return err;

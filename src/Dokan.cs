@@ -368,9 +368,9 @@ namespace Beyond
 
         public NtStatus MoveFile(string oldName, string newName, bool replace, IDokanFileInfo info)
         {
-            var err = _backend.OnRenamePath(oldName.Replace("\\", "/"), newName.Replace("\\", "/"));
+            var err = _backend.OnRenamePath(oldName.Replace("\\", "/"), newName.Replace("\\", "/"), replace);
             if (err != 0)
-                return Trace(nameof(MoveFile), oldName, info, DokanResult.AccessDenied);
+                return Trace(nameof(MoveFile), oldName, info, (err == Errno.EEXIST) ? DokanResult.FileExists : DokanResult.AccessDenied);
             return Trace(nameof(MoveFile), oldName, info, DokanResult.Success, newName,
                 replace.ToString(CultureInfo.InvariantCulture));
         }

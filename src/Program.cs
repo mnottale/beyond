@@ -241,6 +241,11 @@ namespace Beyond
                     using (var mre = new System.Threading.ManualResetEvent(false))
                     using (var dokan = new Dokan(dokanLogger))
                     {
+                        Console.CancelKeyPress += (object sender, ConsoleCancelEventArgs e) =>
+                        {
+                            e.Cancel = true;
+                            mre.Set();
+                        };
                         var dokanBuilder = new DokanInstanceBuilder(dokan)
                         .ConfigureLogger(() => dokanLogger)
                         .ConfigureOptions(options =>
