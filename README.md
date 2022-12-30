@@ -154,10 +154,33 @@ This command will iterate on all blocks of all storages and rebalance
 under-replicated blocks to new nodes. Obviously run this when the
 number of connected nodes is at least equal to replication factor.
 
+## Beyondctl
+
+Beyondctl is a conveniant wrapper around the 'xattr' API, that works on both Linux
+and Windows. It can be used to administrate permissions or help debugging stuff.
+
+    beyondctl.py GETTER_VERB mount_point path
+    beyondctl.py SETTER_VERB VALUE mount_point path
+
+The available getters are:
+
+  - address: hex-encoded address of the file or directory Block
+  - owners: list of node addresses of the nodes owning the block storage
+  - ownerstate: bitmask of owners in order, 1 means the block is up to date, 0 means outdated storage
+  - dump: json dump of the unencrypted block
+  - info: show owner, readers, writers and inherit modes
+
+The available setters are:
+
+  - addreader, removereader: add/remove a key (hash or alias) to the authorized readers
+  - addwriter, removewriter: add/remove a key to the authorized writers
+  - addadmin, removeadmin: add/remove a key to the admin key list (filesystem scope)
+  - addalias: register an alias for a given key. VALUE is "alias:hexkeyhash" (filesystem scope)
+  - inherit: set inherit mode for this directory VALUE is a combination of 'r', 'w' (or empty)
+  - creategroup: create a group and registers alias VALUE
+  
 ## Future features and goals
 
-  - Caching layer for faster usage
-  - Plug crypto layer weaknesse by signing block deletion requests.
   - Safer read that checks quorum
   - Healing outdated blocks
   - ...
