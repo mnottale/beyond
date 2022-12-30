@@ -255,10 +255,13 @@ class Beyond:
             self.key_sigs.append(open(opj(os.environ['HOME'], '.beyond', self.keys[i]+'.keysig'), 'r').read())
         time.sleep(4) # let it time to mount
         # add aliases
-        for i in range(mounts):
-            os.setxattr(self.mount_point(0), 'beyond.addalias', (self.keys[i] + ':' + self.key_sigs[i]).encode())
-        if mounts > 1:
-            os.setxattr(self.mount_point(0), 'beyond.addreader', self.key_sigs[1].encode())
+        try:
+            for i in range(mounts):
+                os.setxattr(self.mount_point(0), 'beyond.addalias', (self.keys[i] + ':' + self.key_sigs[i]).encode())
+            if mounts > 1:
+                os.setxattr(self.mount_point(0), 'beyond.addreader', self.key_sigs[1].encode())
+        except Exception as e:
+            print('Setup failure, investigate...')
     def kill_node(self, i):
         self.nodes[i][0].terminate()
         self.nodes[i] = (None, self.nodes[i][1])

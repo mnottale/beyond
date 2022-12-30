@@ -176,6 +176,21 @@ namespace Beyond
 		        logger.LogInformation("STAT META {path} OK", path);
 		        return 0;
 		    }
+		    if (path.StartsWith("/$beyondctl"))
+		    {
+		        var components = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+		        var mode = FilePermissions.S_IFDIR;
+		        if (components[components.Length-1] == "$")
+		            mode = FilePermissions.S_IFREG;
+		        buf.st_mode = mode | NativeConvert.FromOctalPermissionString("644");
+		        buf.st_blksize = 65536;
+		        buf.st_uid = permUid;
+		        buf.st_gid = permGid;
+		        buf.st_nlink = 1;
+		        buf.st_size = 4096;
+		        logger.LogInformation("STAT META {path} OK", path);
+		        return 0;
+		    }
 		    try
 		    {
 		        logger.LogInformation("STAT {path}", path);
@@ -475,9 +490,9 @@ namespace Beyond
 		}
 		protected override Errno OnRenamePath (string from, string to)
 		{
-		    return OnRenamePath(from, to, true);
+		    return OnRenamePathEx(from, to, true);
 		}
-		protected Errno OnRenamePath (string from, string to, bool replace)
+		protected Errno OnRenamePathEx (string from, string to, bool replace)
 		{
 		    logger.LogInformation("MV {from} {to}", from, to);
 		    try
@@ -558,6 +573,8 @@ namespace Beyond
 		protected override Errno OnTruncateFile (string path, long size)
 		{
 		    logger.LogInformation("TRUNK {path} {size}", path, size);
+		    if (path.StartsWith("/$beyondctl/"))
+		        return 0;
 		    var err = OpenOrCreate(path, false, null, null, OpenFlags.O_RDWR);
 		    if (err != 0)
 		        return err;
@@ -671,7 +688,10 @@ namespace Beyond
 		    var fl = info?.OpenFlags ?? flags.Value;
 		    var amask = fl & (OpenFlags.O_RDONLY | OpenFlags.O_WRONLY | OpenFlags.O_RDWR);
 		    var canWrite = amask == OpenFlags.O_WRONLY || amask == OpenFlags.O_RDWR;
+
 		    logger.LogInformation("OPEN {path} write={canwrite}", path, canWrite);
+		    if (path.StartsWith("/$beyondctl/"))
+		        return 0;
 		    try
 		    {
 		        if (openedFiles.TryGetValue(path, out var oh))
@@ -806,6 +826,21 @@ namespace Beyond
 				long offset, out int bytesRead)
 		{
 		    logger.LogInformation("READ {path} {offset} {len}", path, offset, buf.Length);
+		    if (path.StartsWith("/$beyondctl/"))
+		    {
+		        if (offset != 0)
+		        {
+		            bytesRead = 0;
+		            return 0;
+		        }
+		        var comps = path.Split('/',  StringSplitOptions.RemoveEmptyEntries);
+		        var attrName = comps[1];
+		        var realPath = "/" + String.Join('/', comps.Skip(2).SkipLast(1));
+		        var err = OnGetPathExtendedAttribute(realPath, attrName, buf, out var br);
+		        bytesRead = br;
+		        logger.LogInformation("READ XATTR got {count} bytes returns {err}", bytesRead, err);
+		        return err;
+		    }
 		    try
 		    {
 		        bytesRead = 0;
@@ -900,6 +935,14 @@ namespace Beyond
 		protected override Errno OnWriteHandle (string path, OpenedPathInfo info,
 				byte[] buf, long offset, out int bytesWritten)
 		{
+		    if (path.StartsWith("/$beyondctl/"))
+		    {
+		        var comps = path.Split('/',  StringSplitOptions.RemoveEmptyEntries);
+		        var attrName = comps[1];
+		        bytesWritten = buf.Length;
+		        var realPath = "/" + String.Join('/', comps.Skip(2).SkipLast(1));
+		        return OnSetPathExtendedAttribute(realPath, attrName, buf, 0);
+		    }
 		    logger.LogInformation("WRITE {path} {offset} {len}", path, offset, buf.Length);
 		    try
 		    {
@@ -1101,6 +1144,7 @@ namespace Beyond
 		}
 		protected override Errno OnSetPathExtendedAttribute (string path, string name, byte[] value, XattrFlags flags)
 		{
+		    logger.LogInformation("SETATTR {path} {name}", path, name);
 		    if (name.StartsWith("beyond."))
 		    {
 		        try
@@ -1342,6 +1386,8 @@ namespace Beyond
 		                    + "inheritRead " + file.Block.InheritReaders + "\n"
 		                    + "inheritWrite " + file.Block.InheritWriters + "\n";
 		            }
+		            if (result == null)
+		                result = "unsupported";
 		            var rb = System.Text.Encoding.UTF8.GetBytes(result);
 		            var l = Math.Min(value.Length, rb.Length);
 		            Array.Copy(rb, value, l);
