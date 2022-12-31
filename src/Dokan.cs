@@ -81,6 +81,7 @@ namespace Beyond
         public NtStatus CreateFile(string fileName, FileAccess access, FileShare share, FileMode mode,
             FileOptions options, FileAttributes attributes, IDokanFileInfo info)
         {
+            _logger.LogInformation("CREATE {name} {mode} {access}", fileName, mode, access);
             fileName = fileName.Replace("\\", "/");
             var result = DokanResult.Success;
             Errno err = 0;
@@ -179,7 +180,7 @@ namespace Beyond
                 if (err != 0)
                     return Trace(nameof(CreateFile), fileName, info, access, share, mode, options, attributes,
                         DokanResult.AccessDenied);
-               info.Context = "handle";
+               info.Context = "handle " + fileName;
             }
             return Trace(nameof(CreateFile), fileName, info, access, share, mode, options, attributes,
                 result);
@@ -187,12 +188,13 @@ namespace Beyond
 
         public void Cleanup(string fileName, IDokanFileInfo info)
         {
+            _logger.LogInformation("Cleanup {name} {handle}", fileName, info.Context != null);
             fileName = fileName.Replace("\\", "/");
 #if TRACE
             if (info.Context != null)
                 Console.WriteLine(DokanFormat($"{nameof(Cleanup)}('{fileName}', {info} - entering"));
 #endif
-            if (info.Context != null && info.Context as string == "handle")
+            if (info.Context != null && ((info.Context as string)?.StartsWith("handle") ?? false))
                 _backend.OnReleaseHandle(fileName, null);
             info.Context = null;
 
@@ -212,6 +214,7 @@ namespace Beyond
 
         public void CloseFile(string fileName, IDokanFileInfo info)
         {
+            _logger.LogInformation("Close {name} {handle}", fileName, info.Context != null);
             fileName = fileName.Replace("\\", "/");
 #if TRACE
             if (info.Context != null)
@@ -226,6 +229,7 @@ namespace Beyond
 
         public NtStatus ReadFile(string fileName, byte[] buffer, out int bytesRead, long offset, IDokanFileInfo info)
         {
+            _logger.LogInformation("Read {name} {offset} {length}", fileName, offset, buffer.Length);
             fileName = fileName.Replace("\\", "/");
             var err = _backend.OnReadHandle(fileName, null, buffer, offset, out bytesRead);
             if (err == Errno.EBADF)
@@ -249,6 +253,7 @@ namespace Beyond
 
         public NtStatus WriteFile(string fileName, byte[] buffer, out int bytesWritten, long offset, IDokanFileInfo info)
         {
+             _logger.LogInformation("Write {name} {offset} {length}", fileName, offset, buffer.Length);
             fileName = fileName.Replace("\\", "/");
             var err = _backend.OnWriteHandle(fileName, null, buffer, offset, out bytesWritten);
             if (err == Errno.EBADF)
@@ -269,6 +274,7 @@ namespace Beyond
 
         public NtStatus FlushFileBuffers(string fileName, IDokanFileInfo info)
         {
+            _logger.LogInformation("Flush {name}", fileName);
             fileName = fileName.Replace("\\", "/");
             _backend.OnSynchronizeHandle(fileName, null, false);
             return Trace(nameof(FlushFileBuffers), fileName, info, DokanResult.Success);
@@ -276,6 +282,7 @@ namespace Beyond
 
         public NtStatus GetFileInformation(string fileName, out FileInformation fileInfo, IDokanFileInfo info)
         {
+            _logger.LogInformation("Stat {name}", fileName);
             var err = _backend.OnGetPathStatus(fileName.Replace("\\", "/"), out var stat);
             if (err != 0) // FIXME error code
             {
@@ -314,7 +321,7 @@ namespace Beyond
         }
         public NtStatus FindFiles(string fileName, out IList<FileInformation> files, IDokanFileInfo info)
         {
-            _logger.LogInformation("*** FF " + fileName);
+            _logger.LogInformation("FindFiles" + fileName);
             var err = _backend.OnReadDirectory(fileName.Replace("\\", "/"), null, out var entries);
             if (err != 0)
             {
@@ -349,6 +356,7 @@ namespace Beyond
 
         public NtStatus DeleteFile(string fileName, IDokanFileInfo info)
         {
+            _logger.LogInformation("DeleteFile {name}", fileName);
             var err = _backend.OnRemoveFile(fileName.Replace("\\", "/"));
             if (err != 0)
                 return Trace(nameof(DeleteFile), fileName, info, DokanResult.AccessDenied);
@@ -358,6 +366,7 @@ namespace Beyond
 
         public NtStatus DeleteDirectory(string fileName, IDokanFileInfo info)
         {
+            _logger.LogInformation("DeleteDir {name}", fileName);
             var err = _backend.OnRemoveDirectory(fileName.Replace("\\", "/"));
             if (err != 0)
                 return Trace(nameof(DeleteDirectory), fileName, info, DokanResult.AccessDenied);
@@ -368,6 +377,7 @@ namespace Beyond
 
         public NtStatus MoveFile(string oldName, string newName, bool replace, IDokanFileInfo info)
         {
+            _logger.LogInformation("MoveFile {name} -> {nameb}", oldName, newName);
             var err = _backend.OnRenamePathEx(oldName.Replace("\\", "/"), newName.Replace("\\", "/"), replace);
             if (err != 0)
                 return Trace(nameof(MoveFile), oldName, info, (err == Errno.EEXIST) ? DokanResult.FileExists : DokanResult.AccessDenied);
@@ -377,6 +387,7 @@ namespace Beyond
 
         public NtStatus SetEndOfFile(string fileName, long length, IDokanFileInfo info)
         {
+            _logger.LogInformation("Truncate {name} {length}", fileName, length);
             var err = _backend.OnTruncateFile(fileName.Replace("\\", "/"), length);
             if (err != 0)
                 return Trace(nameof(SetEndOfFile), fileName, info, DokanResult.AccessDenied);
@@ -412,7 +423,7 @@ namespace Beyond
         public NtStatus GetVolumeInformation(out string volumeLabel, out FileSystemFeatures features,
             out string fileSystemName, out uint maximumComponentLength, IDokanFileInfo info)
         {
-            volumeLabel = "DOKAN";
+            volumeLabel = "BEYOND";
             fileSystemName = "NTFS";
             maximumComponentLength = 256;
 

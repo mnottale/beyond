@@ -39,7 +39,7 @@ namespace Beyond
         private Cache cache = null;
         public FileSystem(ILoggerFactory loggerFactory, BeyondClient.BeyondClientClient client, string fsName = null, uint uid=0, uint gid=0, Crypto c = null, ulong immutableCacheSize = 0, ulong mutableCacheDuration = 0)
         {
-            logger = loggerFactory.CreateLogger<BeyondServiceImpl>();
+            logger = loggerFactory.CreateLogger<FileSystem>();
             this.client = client;
             permUid = uid;
             permGid = gid;

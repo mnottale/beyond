@@ -22,6 +22,62 @@ using Microsoft.Extensions.Hosting;
 #if Windows
 using DokanNet;
 using DokanNet.Logging;
+
+class DokanFilteredLogger: DokanNet.Logging.ILogger
+{
+    private readonly LogLevel _level;
+    private readonly Microsoft.Extensions.Logging.ILogger _logger;
+    public DokanFilteredLogger(Microsoft.Extensions.Logging.ILogger logger, LogLevel level)
+    {
+        _logger = logger;
+        _level = level;
+    }
+    public bool DebugEnabled => true;
+    public void Debug(string message, params object[] args)
+    {
+        if (_level > LogLevel.Debug)
+            return;
+        if (args.Length > 0)
+            message = string.Format(message, args);
+        _logger.LogDebug(message);
+    }
+    
+    /// <inheritdoc />
+    public void Info(string message, params object[] args)
+    {
+        if (_level > LogLevel.Information)
+            return;
+         if (args.Length > 0)
+            message = string.Format(message, args);
+        _logger.LogInformation(message);
+    }
+    
+    /// <inheritdoc />
+    public void Warn(string message, params object[] args)
+    {
+        if (_level > LogLevel.Warning)
+            return;
+        if (args.Length > 0)
+            message = string.Format(message, args);
+        _logger.LogWarning(message);
+    }
+    
+    /// <inheritdoc />
+    public void Error(string message, params object[] args)
+    {
+        if (_level > LogLevel.Error)
+            return;
+        if (args.Length > 0)
+            message = string.Format(message, args);
+        _logger.LogError(message);
+    }
+    public void Fatal(string message, params object[] args)
+    {
+        if (args.Length > 0)
+            message = string.Format(message, args);
+        _logger.LogError(message);
+    }
+}
 #endif
 
 namespace Beyond
@@ -105,7 +161,9 @@ namespace Beyond
                 {"fs", "Beyond.Filesystem"},
                 {"storage", "Beyond.Storage"},
                 {"node", "Beyond.BeyondServiceImpl"},
+                {"dokanfs", "Beyond.DokanFS"},
             };
+            LogLevel dokanLevel = LogLevel.Debug;
             var loggerFactory = LoggerFactory.Create(logging =>
                 {
                     logging.AddConsole();
@@ -117,7 +175,9 @@ namespace Beyond
                         {
                             var kv = l.Split('=');
                             var ll = levelNames[kv[1].ToLower()];
-                            if (categs.TryGetValue(kv[0].ToLower(), out var cn))
+                            if (kv[0].ToLower() == "dokan")
+                                dokanLevel = ll;
+                            else if (categs.TryGetValue(kv[0].ToLower(), out var cn))
                                 logging.AddFilter(cn, ll);
                             else
                                 Console.WriteLine("Unknown log category " + kv[0]);
@@ -203,7 +263,7 @@ namespace Beyond
                 if (!string.IsNullOrEmpty(Mount))
                 {
 #if Windows
-                    using var dokanLogger = new ConsoleLogger("[Dokan] ");
+                    var dokanLogger = new DokanFilteredLogger(loggerFactory.CreateLogger<Dokan>(), dokanLevel);
                     var fs = new DokanFS(loggerFactory, bclient, FsName, Uid, Gid, crypto, ImmutableCacheSize, MutableCacheDuration);
 #else
                     var fs = new FileSystem(loggerFactory, bclient, FsName, Uid, Gid, crypto, ImmutableCacheSize, MutableCacheDuration);
@@ -250,7 +310,7 @@ namespace Beyond
                         .ConfigureLogger(() => dokanLogger)
                         .ConfigureOptions(options =>
                             {
-                                //options.Options = DokanOptions.DebugMode | DokanOptions.EnableNotificationAPI;
+                                options.Options = /*DokanOptions.DebugMode |*/ DokanOptions.EnableNotificationAPI;
                                 options.MountPoint = mountPoint;
                             });
                         using (var dokanInstance = dokanBuilder.Build(fs))
