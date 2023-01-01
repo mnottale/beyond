@@ -181,6 +181,8 @@ namespace Beyond
                     return Trace(nameof(CreateFile), fileName, info, access, share, mode, options, attributes,
                         DokanResult.AccessDenied);
                info.Context = "handle " + fileName;
+               if (mode == FileMode.OpenOrCreate)
+                   result = DokanResult.AlreadyExists;
             }
             return Trace(nameof(CreateFile), fileName, info, access, share, mode, options, attributes,
                 result);
@@ -188,7 +190,7 @@ namespace Beyond
 
         public void Cleanup(string fileName, IDokanFileInfo info)
         {
-            _logger.LogInformation("Cleanup {name} {handle}", fileName, info.Context != null);
+            _logger.LogInformation("Cleanup {name} {handle} delete={delete}", fileName, info.Context != null, info.DeleteOnClose);
             fileName = fileName.Replace("\\", "/");
 #if TRACE
             if (info.Context != null)
@@ -465,7 +467,7 @@ namespace Beyond
         public NtStatus SetFileSecurity(string fileName, FileSystemSecurity security, AccessControlSections sections,
             IDokanFileInfo info)
         {
-            return DokanResult.NotImplemented;
+            return DokanResult.Success;
             /*
             try
             {
