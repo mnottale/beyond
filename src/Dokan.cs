@@ -102,7 +102,7 @@ namespace Beyond
                             break;
 
                         case FileMode.CreateNew:
-                            err = _backend.OnCreateDirectory(fileName, NativeConvert.FromOctalPermissionString("777"));
+                            err = _backend.OnCreateDirectoryEx(fileName, "777");
                             if (err != 0)
                                 return Trace(nameof(CreateFile), fileName, info, access, share, mode, options,
                                             attributes, DokanResult.AccessDenied);
@@ -137,12 +137,13 @@ namespace Beyond
                             // check if driver only wants to read attributes, security info, or open directory
                             if (readWriteAttributes || pathIsDirectory)
                             {
+                                /* Mirror sample does that, unclear why
                                 if (pathIsDirectory && (access & FileAccess.Delete) == FileAccess.Delete
                                     && (access & FileAccess.Synchronize) != FileAccess.Synchronize)
                                     //It is a DeleteFile request on a directory
                                     return Trace(nameof(CreateFile), fileName, info, access, share, mode, options,
                                         attributes, DokanResult.AccessDenied);
-
+                                */
                                 info.IsDirectory = pathIsDirectory;
                                 info.Context = new object();
                                 // must set it to something if you return DokanError.Success
@@ -172,9 +173,9 @@ namespace Beyond
                 }
                 // FIXME truncate
                 err = _backend.OpenOrCreate(fileName,
-                    mode == FileMode.CreateNew,
+                    mode == FileMode.CreateNew || mode == FileMode.OpenOrCreate,
                     null,
-                    NativeConvert.FromOctalPermissionString("777"),
+                    null,
                     readAccess ? OpenFlags.O_RDONLY : OpenFlags.O_RDWR);
                 _logger.LogWarning("OPEN " + fileName + " "  + err.ToString());
                 if (err != 0)
@@ -359,7 +360,7 @@ namespace Beyond
         public NtStatus DeleteFile(string fileName, IDokanFileInfo info)
         {
             _logger.LogInformation("DeleteFile {name}", fileName);
-            var err = _backend.OnRemoveFile(fileName.Replace("\\", "/"));
+            var err = _backend.CanWrite(fileName.Replace("\\", "/"));
             if (err != 0)
                 return Trace(nameof(DeleteFile), fileName, info, DokanResult.AccessDenied);
             return Trace(nameof(DeleteFile), fileName, info, DokanResult.Success);
@@ -369,11 +370,10 @@ namespace Beyond
         public NtStatus DeleteDirectory(string fileName, IDokanFileInfo info)
         {
             _logger.LogInformation("DeleteDir {name}", fileName);
-            var err = _backend.OnRemoveDirectory(fileName.Replace("\\", "/"));
+            var err = _backend.CanWrite(fileName.Replace("\\", "/"));
             if (err != 0)
                 return Trace(nameof(DeleteDirectory), fileName, info, DokanResult.AccessDenied);
             return Trace(nameof(DeleteDirectory), fileName, info, DokanResult.Success);
-
             // if dir is not empty it can't be deleted
         }
 

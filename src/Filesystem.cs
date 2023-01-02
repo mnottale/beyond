@@ -163,6 +163,17 @@ namespace Beyond
             block = current;
             return 0;
         }
+        protected Errno CanWrite(string path)
+        {
+            var err = Get(path, out var block);
+            if (err != 0)
+                return err;
+            if (crypto == null)
+                return 0;
+            if (!crypto.CanWrite(block))
+                return Errno.EACCES;
+            return 0;
+        }
         protected override Errno OnGetPathStatus (string path, out Stat buf)
 		{
 		    buf = new Stat();
@@ -331,7 +342,11 @@ namespace Beyond
 		}
 		protected override Errno OnCreateDirectory (string path, FilePermissions mode)
 		{
-		    logger.LogInformation("MKDIR {path}", path);
+		    return OnCreateDirectoryEx(path, NativeConvert.ToOctalPermissionString(mode));
+		}
+		protected Errno OnCreateDirectoryEx (string path, string mode)
+		{
+		    logger.LogInformation("MKDIR {path} {mode}", path, mode);
 		    BlockAndKey parent;
 		    var err = Get(path, out parent, parent:true);
 		    if (err != 0)
@@ -349,7 +364,7 @@ namespace Beyond
 		    bak.Block.Version = 1;
 		    bak.Block.Data = new BlockData();
 		    bak.Block.Data.Directory = new DirectoryIndex();
-		    bak.Block.Data.Mode = NativeConvert.ToOctalPermissionString(mode);
+		    bak.Block.Data.Mode = mode;
 		    bak.Block.InheritReaders = parent.Block.InheritReaders;
 		    bak.Block.InheritWriters = parent.Block.InheritWriters;
 		    bak.Block.Mtime = DateTimeOffset.Now.ToUnixTimeSeconds();
@@ -722,7 +737,7 @@ namespace Beyond
 		            file.Block = new Block();
 		            file.Block.Version = 1;
 		            file.Block.Data = new BlockData();
-		            file.Block.Data.Mode = NativeConvert.ToOctalPermissionString(mode.Value);
+		            file.Block.Data.Mode = mode.HasValue ? NativeConvert.ToOctalPermissionString(mode.Value) : "777";
 		            file.Block.Mtime = DateTimeOffset.Now.ToUnixTimeSeconds();
 		            file.Block.Ctime = file.Block.Mtime;
 		            if (crypto != null)
