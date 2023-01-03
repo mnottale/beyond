@@ -7,6 +7,14 @@ Beyond is a work-in-progress cryptographically secure distributed filesystem.
 Data is split into blocks which are spread across storage nodes, with
 a configureable replication factor.
 
+## Why do I need it?
+
+If you have a room full of computers (say the desktops of your company's employees)
+with terabytes of unused storage, you want to store important data in a redundant
+and secure way with precise access control, outside of the cloud, and want a
+cheaper alternative to a very expensive NAS, then Beyond is for you.
+
+
 ## How to build it?
 
 Clone the repository and its submodules.
@@ -35,6 +43,14 @@ Launch mount with `beyond --mount /mount/point --replication 3 --peers http://lo
 On first launch add `--create`. Never pass it again or it will destroy everything.
 
 It is mandatory to pass the same `--replication` to all commands.
+
+## How to configure logging verbosity?
+
+Use `--logging` command line argument. Pass a global level limiter by using any of
+"trace","debug","info","warn","err", and/or a comma-separated list of key=value
+pairs, key being the component ("crypto,fs,storage,node,dokanfs,dokan") and value
+the level in list above.
+
 
 ## How to activate crypto layer?
 
@@ -78,7 +94,7 @@ keys are stored as immutable blocks.
 
 You can add keys to each file or directory's authorized readers and writers.
 
-This is achieved using extended attributes.
+This is achieved using extended attributes or `beyondctl` utility (see below).
 
 The root block owner (creator of the filesystem) can register aliases to avoid
 using key hashes all the time.
