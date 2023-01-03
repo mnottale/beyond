@@ -177,10 +177,11 @@ namespace Beyond
                     null,
                     null,
                     readAccess ? OpenFlags.O_RDONLY : OpenFlags.O_RDWR);
-                _logger.LogWarning("OPEN " + fileName + " "  + err.ToString());
+                if (err != 0)
+                    _logger.LogWarning("OPEN " + fileName + " "  + err.ToString());
                 if (err != 0)
                     return Trace(nameof(CreateFile), fileName, info, access, share, mode, options, attributes,
-                        DokanResult.AccessDenied);
+                        DokanResult.FileNotFound);
                info.Context = "handle " + fileName;
                if (mode == FileMode.OpenOrCreate)
                    result = DokanResult.AlreadyExists;
