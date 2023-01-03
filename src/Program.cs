@@ -164,6 +164,12 @@ namespace Beyond
                         foreach(var l in Logging.Split(','))
                         {
                             var kv = l.Split('=');
+                            if (kv.Length == 1)
+                            {
+                                var ml = levelNames[kv[0].ToLower()];
+                                logging.SetMinimumLevel(ml);
+                                continue;
+                            }
                             var ll = levelNames[kv[1].ToLower()];
                             if (categs.TryGetValue(kv[0].ToLower(), out var cn))
                                 logging.AddFilter(cn, ll);
